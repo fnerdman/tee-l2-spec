@@ -228,6 +228,33 @@ When a client connects to a block builder service:
 
 This approach unifies the security model for both block verification and service connectivity, using the same trust chain for both.
 
+## Service Discovery
+
+TEE services (block builders and coordinators) are discovered through a simple DNS-based mechanism:
+
+1. Each service is assigned a domain name (e.g., `coordinator.example.com`, `builder.example.com`)
+2. DNS records map these domain names to the IP addresses of the respective services
+3. Clients connect to services using these domain names
+4. Service identity is verified through TLS certificates containing the expected workload identity
+
+This approach separates service discovery from service verification:
+- DNS provides the network location (IP address) of the service
+- TLS certificates with TEE attestation provide cryptographic verification of service identity
+
+The domain names are typically provided through:
+- Configuration files for the sequencer and other clients
+- Documentation for users who need to connect directly to the services
+- Administrative interfaces for operators
+
+When a client connects to a service:
+1. It resolves the domain name to an IP address using standard DNS
+2. It establishes a TLS connection to that IP address
+3. It verifies the TLS certificate against the coordinator's CA certificate
+4. It extracts and verifies the workload identity from the certificate
+5. Only if all verifications pass does it trust the connection
+
+This ensures that clients only communicate with legitimate, attested TEE services, even if the DNS infrastructure is compromised.
+
 ## Verification Models
 
 The protocol supports two verification models:

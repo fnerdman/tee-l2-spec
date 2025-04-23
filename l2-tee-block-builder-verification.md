@@ -153,19 +153,19 @@ This approach enables deterministic key recovery and creates a cryptographic bin
 When producing blocks, the TEE-protected block builder:
 
 1. Generates a block according to the L2 protocol rules
-2. Computes the block hash (`BlockHash = hash_tree_root(block)`)
-3. Signs the block hash with its private key (derived from the coordinator-provided seed)
-4. The signature, along with verification material, forms a "TEE proof"
+2. Computes a signature target by hashing all transaction hashes in order, along with block metadata
+3. Signs this signature target with its private key (derived from the coordinator-provided seed)
+4. Adds the signature as a final transaction in the block
+5. The signature transaction, along with verification material, forms a "TEE proof"
 
 ### TEE Proof Structure
 
-There are two types of TEE proofs depending on the verification model:
+The signature is included as the final transaction in the block. There are two types of TEE proofs depending on the verification model:
 
 #### PKI-based TEE Proof
 ```
 struct PKITEEProof {
-    bytes blockHash;         // Hash of the block being proven
-    bytes signature;         // Signature over blockHash using TEE-protected key
+    bytes signature;         // Signature over computed transaction hash using TEE-protected key
     bytes certificate;       // X.509 certificate signed by coordinator
 }
 ```
@@ -173,9 +173,20 @@ struct PKITEEProof {
 #### Direct Attestation TEE Proof
 ```
 struct DirectTEEProof {
-    bytes blockHash;         // Hash of the block being proven
-    bytes signature;         // Signature over blockHash using TEE-protected key
+    bytes signature;         // Signature over computed transaction hash using TEE-protected key
     bytes32 attestationHash; // Hash of the attestation record stored on-chain
+}
+```
+
+The signature transaction itself has this structure:
+```
+SignatureTransaction {
+    to: TEE_SIGNATURE_CONTRACT_ADDRESS,
+    from: TEE_BUILDER_ADDRESS,
+    value: 0,
+    data: abi.encode(
+        signature
+    )
 }
 ```
 
@@ -185,19 +196,25 @@ To verify a block with a PKI-based TEE proof:
 
 ```
 function VerifyBlockWithPKI(block, teeProof, coordinatorPublicKeys, expectedMeasurements) {
-    // 1. Verify block hash matches the hash in the proof
-    computedHash = hash_tree_root(block)
-    if computedHash != teeProof.blockHash {
-        return false
-    }
+    // 1. Get the final signature transaction
+    signatureTx = block.transactions[block.transactions.length - 1]
     
-    // 2. Verify certificate was signed by an authorized coordinator
+    // 2. Extract signature from the transaction
+    signature = abi.decode(signatureTx.data)
+    
+    // 3. Get regular transactions (all except signature transaction)
+    regularTxs = block.transactions.slice(0, block.transactions.length - 1)
+    
+    // 4. Compute hash of all regular transaction hashes
+    computedTarget = HashTransactions(regularTxs, block)
+    
+    // 5. Verify certificate was signed by an authorized coordinator
     if !VerifyCertificateSignature(teeProof.certificate, coordinatorPublicKeys) {
         return false
     }
     
-    // 3. Verify block signature using certificate's public key
-    if !VerifySignature(teeProof.blockHash, teeProof.signature, teeProof.certificate.PublicKey) {
+    // 6. Verify signature using certificate's public key
+    if !VerifySignature(computedTarget, signature, teeProof.certificate.PublicKey) {
         return false
     }
     
@@ -304,6 +321,21 @@ X.509 Certificate {
 ## Service Connectivity and TLS Authentication
 
 Beyond block verification, secure communication with TEE services is critical. The protocol uses the same trust chain for both block signatures and service connectivity.
+
+### Service Discovery
+
+TEE services (block builders and coordinators) are discovered through a simple DNS-based mechanism:
+
+1. Each service is assigned a domain name (e.g., `coordinator.example.com`, `builder.example.com`)
+2. DNS records map these domain names to the IP addresses of the respective services
+3. Clients connect to services using these domain names
+4. Service identity is verified through TLS certificates containing the expected workload identity
+
+This approach separates service discovery from service verification:
+- DNS provides the network location (IP address) of the service
+- TLS certificates with TEE attestation provide cryptographic verification of service identity
+
+No additional on-chain discovery mechanism is required, as clients verify service identity using the same attestation mechanism used for block verification.
 
 ### Rollup Boost Integration
 
