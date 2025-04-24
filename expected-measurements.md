@@ -16,9 +16,9 @@ TEE measurements are hardware-enforced hashes of the code and initial data loade
 struct TDXMeasurements {
     bytes MRTD;             // Initial TD measurement (boot loader, initial data)
     bytes[4] RTMR;          // Runtime measurements (extended at runtime)
-    bytes MROWNER;          // Owner measurement (trusted policies)
-    bytes MRCONFIGID;       // Configuration ID (unique ID of the VVD/configuration)
-    bytes MROWNERCONFIG;    // Owner-defined configuration (includes authorized pubkeys)
+    bytes MROWNER;          // Contains operator's public key (Ethereum address or other identifier)
+    bytes MRCONFIGID;       // Hash of service configuration stored onchain and fetched on boot
+    bytes MROWNERCONFIG;    // Contains unique instance ID chosen by the operator
 }
 ```
 
@@ -43,7 +43,15 @@ function DeriveWorkloadIdentity(measurements TDXMeasurements) bytes32 {
 }
 ```
 
-The workload identity encompasses all measurement registers including MRTD, RTMRs, MROWNER, MRCONFIGID, and MROWNERCONFIG, ensuring that any change to the code, configuration, or policy results in a different identity that must be explicitly authorized.
+The workload identity encompasses all measurement registers including MRTD, RTMRs, MROWNER, MRCONFIGID, and MROWNERCONFIG, ensuring that any change to the code, configuration, or operator results in a different identity that must be explicitly authorized.
+
+These measurement registers serve specific purposes in the permissioned attestation model:
+
+- **MROWNER**: Contains the operator's public key (Ethereum address or other identifier), establishing who is authorized to run this instance
+- **MROWNERCONFIG**: Contains a unique instance ID chosen by the operator, which the operator must sign to authenticate itself
+- **MRCONFIGID**: Contains a hash of the actual service configuration that is stored onchain and fetched during boot
+
+This permissioned model ensures that only authorized operators can run authorized workloads. The TEE enforces this by requiring operator authentication via signature verification of the instance ID before proceeding with registration.
 
 ## On-Chain Verification System
 

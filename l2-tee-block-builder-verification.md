@@ -81,9 +81,9 @@ A TEE's workload identity is derived from a combination of its measurement regis
 struct TDXMeasurements {
     bytes MRTD;             // Initial TD measurement (boot loader, initial data)
     bytes[4] RTMR;          // Runtime measurements (extended at runtime)
-    bytes MROWNER;          // Owner measurement (trusted policies)
-    bytes MRCONFIGID;       // Configuration ID (unique ID of the VVD/configuration)
-    bytes MROWNERCONFIG;    // Owner-defined configuration (includes authorized pubkeys)
+    bytes MROWNER;          // Contains operator's public key (Ethereum address or other identifier)
+    bytes MRCONFIGID;       // Hash of service configuration stored onchain and fetched on boot
+    bytes MROWNERCONFIG;    // Contains unique instance ID chosen by the operator
 }
 ```
 
@@ -111,17 +111,29 @@ function ComputeTDXWorkloadIdentity(quote *TDXQuote) ([32]byte, error) {
 }
 ```
 
-The MROWNERCONFIG register is particularly important as it can contain:
-- References to authorized administrator public keys
-- Network configuration parameters
-- Access control policies
-- Other runtime configuration values
+These measurement registers serve specific purposes in the permissioned attestation model:
 
-All of these values are captured in the workload identity hash, ensuring that any change to the configuration results in a different identity that must be explicitly authorized.
+- **MROWNER**: Contains the operator's public key (Ethereum address or other identifier), establishing who is authorized to run this instance
+- **MROWNERCONFIG**: Contains a unique instance ID chosen by the operator, which the operator must sign to authenticate itself
+- **MRCONFIGID**: Contains a hash of the actual service configuration that is stored onchain and fetched during boot
+
+All of these values are captured in the workload identity hash, ensuring that any change to the configuration or operator results in a different identity that must be explicitly authorized through governance.
 
 ### Extended Identity with Operator
 
-For certain applications, the operator's identity can be combined with the workload identity:
+The system uses a permissioned model where operators must be explicitly authorized to run specific workloads. The operator's identity is established through:
+
+1. The **MROWNER** field containing the operator's public key
+2. The **MROWNERCONFIG** field containing a unique instance ID chosen by the operator
+
+During TEE initialization, the operator must authenticate itself by providing a signature of the instance ID using the private key corresponding to the public key in MROWNER. This signature is delivered through a secure channel (cloud-init, virtio, attested TLS, etc.). The TEE verifies this signature before proceeding with registration.
+
+This approach ensures that:
+- Only authorized operators can run specific workloads
+- Each TEE instance has a unique, operator-authenticated identity
+- The TEE self-enforces operator authentication before operation
+
+For additional security, an extended identity can be computed:
 
 ```
 function ComputeExtendedIdentity(workloadIdentity [32]byte, operatorAddress [20]byte) ([32]byte, error) {
@@ -129,8 +141,6 @@ function ComputeExtendedIdentity(workloadIdentity [32]byte, operatorAddress [20]
     return SHA256(workloadIdentity || operatorAddress)
 }
 ```
-
-This extended identity ensures that only specific operators are authorized to run particular workloads.
 
 ### Dual Certificate Model and Key Derivation
 

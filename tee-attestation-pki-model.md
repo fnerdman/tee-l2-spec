@@ -73,9 +73,9 @@ A TEE's workload identity is derived from a combination of its measurement regis
 struct TDXMeasurements {
     bytes MRTD;             // Initial TD measurement (boot loader, initial data)
     bytes[4] RTMR;          // Runtime measurements (extended at runtime)
-    bytes MROWNER;
-    bytes MRCONFIGID;
-    bytes MROWNERCONFIG;
+    bytes MROWNER;          // Contains operator's public key (Ethereum address or other identifier)
+    bytes MRCONFIGID;       // Hash of service configuration stored onchain and fetched on boot
+    bytes MROWNERCONFIG;    // Contains unique instance ID chosen by the operator
 }
 ```
 
@@ -102,7 +102,13 @@ function ComputeTDXWorkloadIdentity(quote *TDXQuote) ([32]byte, error) {
 }
 ```
 
-All of these values are captured in the workload identity hash, ensuring that any change to the configuration results in a different identity that must be explicitly authorized.
+These measurement registers serve specific purposes in the permissioned attestation model:
+
+- **MROWNER**: Contains the operator's public key (Ethereum address or other identifier), establishing who is authorized to run this instance
+- **MROWNERCONFIG**: Contains a unique instance ID chosen by the operator, which the operator must sign to authenticate itself
+- **MRCONFIGID**: Contains a hash of the actual service configuration that is stored onchain and fetched during boot
+
+All of these values are captured in the workload identity hash, ensuring that any change to the configuration or operator results in a different identity that must be explicitly authorized through governance. This permissioned model ensures that only authorized operators can run authorized workloads.
 
 ## Certificate Authority Model
 
