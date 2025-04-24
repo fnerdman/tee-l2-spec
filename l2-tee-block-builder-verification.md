@@ -132,19 +132,27 @@ function ComputeExtendedIdentity(workloadIdentity [32]byte, operatorAddress [20]
 
 This extended identity ensures that only specific operators are authorized to run particular workloads.
 
-### Deterministic Key Derivation
+### Dual Certificate Model and Key Derivation
 
-The key generation process uses a deterministic approach:
+The block builder uses two separate certificates:
 
-1. When a block builder node starts and completes TEE attestation, it first sends its attestation quote to the coordinator
-2. The coordinator verifies the attestation quote and derives a unique seed based on the block builder's workload identity:
+1. **TLS Certificate**: An ephemeral certificate for secure communications
+2. **Block Signing Certificate**: A deterministically derived certificate for signing blocks
+
+The block signing key derivation process uses a deterministic approach:
+
+1. When a block builder node starts, it first generates an ephemeral TLS key pair
+2. It includes the hash of the TLS public key in the attestation quote's UserData field
+3. It sends the attestation quote and TLS public key to the coordinator
+4. The coordinator verifies the attestation and issues a TLS certificate
+5. Over the secure TLS connection, the coordinator derives a unique seed for the block builder:
    `derived_seed = HMAC-SHA256(coordinator_master_seed, workload_identity)`
-3. The coordinator securely transmits this derived seed to the block builder
-4. The block builder uses this seed to deterministically generate its key pair inside the TEE
-5. The block builder creates a CSR with this key pair and sends it to the coordinator
-6. The coordinator signs the certificate and returns it
+6. The coordinator securely transmits this derived seed to the block builder
+7. The block builder uses this seed to deterministically generate its signing key pair inside the TEE
+8. The block builder creates a CSR with this signing key pair and sends it to the coordinator
+9. The coordinator signs the block signing certificate and returns it
 
-This approach enables deterministic key recovery and creates a cryptographic binding between the workload identity and the block builder's keys.
+This approach enables deterministic key recovery for the signing key and creates a cryptographic binding between the attestation and both certificates.
 
 ## Block Signatures and Verification
 
@@ -289,29 +297,55 @@ Note that the coordinator does not need to separately verify if the workload ide
 
 ### Attested TLS Certificates
 
-The same key pair used for block signing is also used for TLS connections:
+The ephemeral TLS certificate is used solely for secure communications:
 
 ```
 X.509 Certificate {
     Version: 3
     Serial Number: <Random value>
-    Subject: CN=BlockBuilderNode, O=L2TEEBuilder
+    Subject: CN=BlockBuilderNode-TLS, O=L2TEEBuilder
     Issuer: CN=TEECoordinator, O=L2TEECoordinator
     Validity:
         Not Before: <Issue time>
         Not After: <Issue time + 7 days>
     Subject Public Key Info:
         Public Key Algorithm: ECDSA
-        Public Key: <Builder's ECDSA public key>
+        Public Key: <Builder's ephemeral TLS public key>
     Extensions:
         SubjectAltName:
             DNS: builder.example.com
             IP: 192.0.2.1
         Authority Key Identifier: <Coordinator key ID>
-        Subject Key Identifier: <Builder key ID>
+        Subject Key Identifier: <TLS key ID>
         X509v3 Extended Key Usage:
             TLS Web Server Authentication
             TLS Web Client Authentication
+        Custom Extension OID 1.3.6.1.4.1.12345.1.1: <WorkloadIdentity>
+        Custom Extension OID 1.3.6.1.4.1.12345.1.2: <OperatorID> (optional)
+    Signature Algorithm: ECDSA-SHA256
+    Signature: <Coordinator's signature>
+}
+```
+
+### Block Signing Certificate
+
+The deterministically derived block signing certificate is used for signing blocks:
+
+```
+X.509 Certificate {
+    Version: 3
+    Serial Number: <Random value>
+    Subject: CN=BlockBuilderNode-Signer, O=L2TEEBuilder
+    Issuer: CN=TEECoordinator, O=L2TEECoordinator
+    Validity:
+        Not Before: <Issue time>
+        Not After: <Issue time + 30 days>
+    Subject Public Key Info:
+        Public Key Algorithm: ECDSA
+        Public Key: <Builder's deterministic signing public key>
+    Extensions:
+        Authority Key Identifier: <Coordinator key ID>
+        Subject Key Identifier: <Signing key ID>
         Custom Extension OID 1.3.6.1.4.1.12345.1.1: <WorkloadIdentity>
         Custom Extension OID 1.3.6.1.4.1.12345.1.2: <OperatorID> (optional)
     Signature Algorithm: ECDSA-SHA256
@@ -342,12 +376,14 @@ No additional on-chain discovery mechanism is required, as clients verify servic
 
 Rollup Boost, as the block builder sidecar for the L2 sequencer, verifies blocks from the TEE block builder using the same verification mechanism:
 
-1. When Rollup Boost establishes a connection to the TEE block builder, it performs TLS verification using the coordinator's CA certificate
-2. During handshake, it obtains and verifies the block builder's certificate and public key
-3. When receiving blocks from the builder, Rollup Boost verifies the block signatures using the public key from the TLS certificate
-4. This ensures that blocks accepted by Rollup Boost were produced by the attested TEE with the expected workload identity
+1. Rollup Boost establishes a secure connection to the TEE block builder using TLS
+2. It verifies the builder's ephemeral TLS certificate against the coordinator's CA certificate
+3. Separately, it retrieves the block builder's signing certificate from a public endpoint
+4. It verifies the signing certificate against the coordinator's CA certificate
+5. When receiving blocks from the builder, Rollup Boost verifies the block signatures using the public key from the signing certificate
+6. This ensures that blocks accepted by Rollup Boost were produced by the attested TEE with the expected workload identity
 
-This seamless integration leverages the PKI infrastructure to ensure that only blocks from valid TEE builders are accepted by the rollup sequencer.
+This integration leverages the PKI infrastructure to ensure that only blocks from valid TEE builders are accepted by the rollup sequencer, while maintaining a clear separation between communication security and block authenticity verification.
 
 ### TLS Connection Verification
 
@@ -365,26 +401,50 @@ function VerifyTLSConnection(tlsCertificate, coordinators) {
         return "Certificate revoked"
     }
     
-    // 3. Extract public key for future block verification
-    builderPublicKey = tlsCertificate.PublicKey
-    
     // Note: No explicit workload identity verification is needed here
     // as the coordinator has already verified the attestation when
     // issuing the certificate
     
-    return "Connection verified", builderPublicKey
+    return "Connection verified"
 }
 ```
 
-### Block Proof/Service Identity Alignment
+### Block Signing Certificate Retrieval
 
-A critical security property is the alignment between block signatures and service identity:
+To retrieve a block builder's signing certificate:
 
-1. When a client connects to a block builder service, it obtains the service's public key from the TLS certificate
-2. This same public key is used to verify blocks produced by that builder
-3. Both the TLS certificate and block signatures are verified against the same trust chain (coordinator attestation)
+```
+function RetrieveSigningCertificate(builderEndpoint, coordinators) {
+    // 1. Fetch the signing certificate from the public endpoint
+    signingCertificate = FetchFromEndpoint(builderEndpoint + "/signing-certificate")
+    
+    // 2. Verify certificate chain
+    if !VerifyCertificateChain(signingCertificate, coordinators) {
+        return "Invalid certificate chain"
+    }
+    
+    // 3. Check certificate revocation status
+    if IsRevoked(signingCertificate.SerialNumber) {
+        return "Certificate revoked"
+    }
+    
+    // 4. Extract the signing public key
+    signingPublicKey = signingCertificate.PublicKey
+    
+    return "Certificate verified", signingPublicKey
+}
+```
 
-This ensures that a block builder cannot produce valid blocks with a signature that doesn't match its service identity, preventing identity spoofing attacks.
+### TEE/Service Identity Verification
+
+With the dual certificate model, the verification process ensures:
+
+1. The TLS certificate secures communications with the block builder service
+2. The signing certificate authenticates blocks produced by the builder
+3. Both certificates are verified against the same coordinator CA
+4. Both certificates contain the same workload identity, binding them to the same attested TEE
+
+This separation of concerns provides clear boundaries between communication security and block authenticity while maintaining the cryptographic binding to the attested TEE.
 
 ## Expected Measurements and On-Chain Verification
 

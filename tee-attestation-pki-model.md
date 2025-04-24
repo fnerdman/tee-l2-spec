@@ -147,59 +147,66 @@ This approach leverages Automata's on-chain DCAP attestation to verify the coord
 3. The coordinator is running authorized code
 4. The coordinator's public key is authenticated
 
-### Deterministic Key Derivation
+### Dual Certificate Model
 
-The certificate issuance process uses a deterministic key derivation approach:
+The block builder utilizes two separate certificates for different purposes:
 
-1. When a block builder node starts and completes TEE attestation, it first sends its attestation quote to the coordinator
-2. The coordinator verifies the attestation quote and derives a unique seed based on the block builder's workload identity:
-   `derived_seed = HMAC-SHA256(coordinator_master_seed, workload_identity)`
-3. The coordinator securely transmits this derived seed to the block builder
-4. The block builder uses this seed to deterministically generate its key pair inside the TEE
-5. The block builder creates a CSR with this key pair and sends it to the coordinator
-6. The coordinator signs the certificate and returns it
+1. **TLS Certificate**: Ephemeral certificate used for secure communications
+2. **Block Signing Certificate**: Deterministically derived and used for signing blocks
 
-This approach ensures cryptographic binding between the attestation process and the block builder's identity, while enabling deterministic key recovery if needed.
+Both certificates are generated within the attested TEE and signed by the coordinator, but they serve different purposes and have different properties.
 
 ### Certificate Issuance Process
 
 When a block builder node starts:
 
-1. It requests an attestation quote from the TDX platform
-2. It sends the attestation quote to the coordinator
-3. The coordinator verifies:
-   - The attestation signature is valid using Intel's endorsements
-   - The attestation's measurements match an authorized workload identity
-4. If verification succeeds, the coordinator derives a unique seed for the block builder based on its workload identity and securely transmits it
-5. The block builder generates its key pair deterministically using the derived seed inside the TEE
-6. The block builder creates a CSR containing its public key and sends it to the coordinator
-7. The coordinator verifies the CSR is valid and created with the expected public key
-8. The coordinator signs the certificate and returns it
+1. **TLS Certificate Bootstrapping**:
+   - The TEE generates an ephemeral ECDSA key pair for TLS
+   - It requests an attestation quote from the TDX platform
+   - It includes a hash of the TLS public key in the attestation quote's UserData field
+   - It sends the attestation quote and TLS public key to the coordinator
+   - The coordinator verifies:
+     - The attestation signature is valid using Intel's endorsements
+     - The attestation's measurements match an authorized workload identity
+     - The TLS public key hash matches the hash in the quote's UserData
+   - If verification succeeds, the coordinator issues a TLS certificate for the ephemeral key
+   - The block builder and coordinator establish a secure TLS connection using this certificate
+
+2. **Block Signing Certificate Creation**:
+   - Over the secure TLS connection, the coordinator derives a unique seed for the block builder:
+     `derived_seed = HMAC-SHA256(coordinator_master_seed, workload_identity)`
+   - The coordinator securely transmits this derived seed to the block builder
+   - The block builder uses this seed to deterministically generate its signing key pair inside the TEE:
+     `(blockSigningPrivateKey, blockSigningPublicKey) = DeriveECDSAKeypair(derived_seed)`
+   - The block builder creates a CSR for the signing key and sends it to the coordinator
+   - The coordinator signs the block signing certificate and returns it
+
+This two-stage process ensures that both certificates are cryptographically bound to the same attested TEE, while serving their distinct purposes.
 
 Note that the coordinator does not need to separately verify if the workload identity is authorized, as this verification is implicitly performed during the registration of the coordinator itself. Since the coordinator is only registered if it runs authorized code, and it verifies the validity of the attestation, there is no need for additional authorization checks.
 
-### Attested TLS Certificates
+### Attested TLS Certificate
 
-The key pair generated using the derived seed is used for both block signing and TLS connections:
+The ephemeral TLS certificate is used solely for secure communications:
 
 ```
 X.509 Certificate {
     Version: 3
     Serial Number: <Random value>
-    Subject: CN=BlockBuilderNode, O=L2TEEBuilder
+    Subject: CN=BlockBuilderNode-TLS, O=L2TEEBuilder
     Issuer: CN=TEECoordinator, O=L2TEECoordinator
     Validity:
         Not Before: <Issue time>
         Not After: <Issue time + 7 days>
     Subject Public Key Info:
         Public Key Algorithm: ECDSA
-        Public Key: <Builder's ECDSA public key>
+        Public Key: <Builder's ephemeral TLS public key>
     Extensions:
         SubjectAltName:
             DNS: builder.example.com
             IP: 192.0.2.1
         Authority Key Identifier: <Coordinator key ID>
-        Subject Key Identifier: <Builder key ID>
+        Subject Key Identifier: <TLS key ID>
         X509v3 Extended Key Usage:
             TLS Web Server Authentication
             TLS Web Client Authentication
@@ -210,16 +217,38 @@ X.509 Certificate {
 }
 ```
 
-This certificate serves two purposes:
-1. It authenticates TLS connections to the block builder service
-2. It provides the public key used to verify block signatures
+### Block Signing Certificate
+
+The deterministically derived block signing certificate is used for signing blocks:
+
+```
+X.509 Certificate {
+    Version: 3
+    Serial Number: <Random value>
+    Subject: CN=BlockBuilderNode-Signer, O=L2TEEBuilder
+    Issuer: CN=TEECoordinator, O=L2TEECoordinator
+    Validity:
+        Not Before: <Issue time>
+        Not After: <Issue time + 30 days>
+    Subject Public Key Info:
+        Public Key Algorithm: ECDSA
+        Public Key: <Builder's deterministic signing public key>
+    Extensions:
+        Authority Key Identifier: <Coordinator key ID>
+        Subject Key Identifier: <Signing key ID>
+        Custom Extension OID 1.3.6.1.4.1.12345.1.1: <WorkloadIdentity>
+        Custom Extension OID 1.3.6.1.4.1.12345.1.2: <OperatorID> (optional)
+    Signature Algorithm: ECDSA-SHA256
+    Signature: <Coordinator's signature>
+}
+```
 
 When a client connects to a block builder service:
-1. The TLS handshake occurs using the attested certificate
-2. The client verifies the certificate is signed by an authorized coordinator
-3. The same verification path used for blocks can be applied to the connection
+1. The TLS handshake occurs using the ephemeral TLS certificate
+2. The client verifies the TLS certificate is signed by an authorized coordinator
+3. For block verification, the deterministic block signing certificate is used
 
-This approach unifies the security model for both block verification and service connectivity, using the same trust chain for both.
+This dual certificate approach separates communication security from block signing while maintaining the same trust foundation for both.
 
 ## Service Discovery
 
