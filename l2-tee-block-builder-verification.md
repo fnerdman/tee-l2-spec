@@ -199,14 +199,14 @@ SignatureTransaction {
 To verify a block with a PKI-based TEE proof:
 
 ```
-function VerifyBlockWithPKI(block, certificate, coordinatorCACert) {
-    // 1. Verify the certificate was signed by a trusted coordinator
-    if !VerifyCertificateChain(certificate, coordinatorCACert) {
+function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, endorsements) {
+    // 1. Verify the signing certificate was signed by a trusted coordinator
+    if !VerifyCertificateChain(signingCertificate, coordinatorCACert) {
         return false
     }
     
-    // 2. Extract the builder's public key from the certificate
-    publicKey = certificate.PublicKey
+    // 2. Extract the builder's signing public key from the certificate
+    signingPublicKey = signingCertificate.PublicKey
     
     // 3. Get the final signature transaction
     signatureTx = block.transactions[block.transactions.length - 1]
@@ -220,13 +220,28 @@ function VerifyBlockWithPKI(block, certificate, coordinatorCACert) {
     // 6. Compute the signature target
     computedTarget = ComputeSignatureTarget(block, normalTransactions)
     
-    // 7. Verify the signature using the public key
-    if !ECDSA_Verify(publicKey, computedTarget, signature) {
+    // 7. Verify the signature using the signing public key
+    if !ECDSA_Verify(signingPublicKey, computedTarget, signature) {
         return false
     }
     
-    // 8. (Optional) Extract and verify workload identity from certificate
-    workloadIdentity = certificate.Extensions["WorkloadIdentity"]
+    // 8. Verify the TDX attestation from certificate extension
+    tdxQuote = signingCertificate.Extensions["TDXQuote"]
+    
+    // 8a. Verify the DCAP attestation signature with Intel endorsements
+    if !VerifyAttestationSignature(tdxQuote, endorsements) {
+        return false
+    }
+    
+    // 8b. Verify the public key hash in quote matches the certificate's
+    reportData = tdxQuote.TDReport.ReportData
+    publicKeyHash = SHA256(signingPublicKey)
+    if !ConstantTimeEquals(reportData[:32], publicKeyHash) {
+        return false
+    }
+    
+    // 8c. Derive and verify workload identity against expected measurements
+    workloadIdentity = DeriveWorkloadIdentity(tdxQuote)
     if !IsExpectedMeasurement(workloadIdentity) {
         return false
     }

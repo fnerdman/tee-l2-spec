@@ -107,14 +107,14 @@ Blocks can be verified using one of two methods, depending on the verification m
 In the PKI model, verifiers use the coordinator's CA certificate to establish a chain of trust:
 
 ```
-function VerifyBlockWithPKI(block, certificate, coordinatorCACert) {
-    // 1. Verify the certificate was signed by a trusted coordinator
-    if !VerifyCertificateChain(certificate, coordinatorCACert) {
+function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, endorsements) {
+    // 1. Verify the signing certificate was signed by a trusted coordinator
+    if !VerifyCertificateChain(signingCertificate, coordinatorCACert) {
         return false
     }
     
-    // 2. Extract the builder's public key from the certificate
-    publicKey = certificate.PublicKey
+    // 2. Extract the builder's signing public key from the certificate
+    signingPublicKey = signingCertificate.PublicKey
     
     // 3. Get the final signature transaction
     signatureTx = block.transactions[block.transactions.length - 1]
@@ -128,13 +128,28 @@ function VerifyBlockWithPKI(block, certificate, coordinatorCACert) {
     // 6. Compute the signature target
     computedTarget = ComputeSignatureTarget(block, normalTransactions)
     
-    // 7. Verify the signature using the public key
-    if !ECDSA_Verify(publicKey, computedTarget, signature) {
+    // 7. Verify the signature using the signing public key
+    if !ECDSA_Verify(signingPublicKey, computedTarget, signature) {
         return false
     }
     
-    // 8. (Optional) Extract and verify workload identity from certificate
-    workloadIdentity = certificate.Extensions["WorkloadIdentity"]
+    // 8. Verify the TDX attestation from certificate extension
+    tdxQuote = signingCertificate.Extensions["TDXQuote"]
+    
+    // 8a. Verify the DCAP attestation signature with Intel endorsements
+    if !VerifyAttestationSignature(tdxQuote, endorsements) {
+        return false
+    }
+    
+    // 8b. Verify the public key hash in quote matches the certificate's
+    reportData = tdxQuote.TDReport.ReportData
+    publicKeyHash = SHA256(signingPublicKey)
+    if !ConstantTimeEquals(reportData[:32], publicKeyHash) {
+        return false
+    }
+    
+    // 8c. Derive and verify workload identity against expected measurements
+    workloadIdentity = DeriveWorkloadIdentity(tdxQuote)
     if !IsExpectedMeasurement(workloadIdentity) {
         return false
     }
@@ -145,25 +160,29 @@ function VerifyBlockWithPKI(block, certificate, coordinatorCACert) {
 
 ### Direct Attestation Verification
 
-For higher security use cases, verifiers can directly verify against attestations:
+For higher security use cases, verifiers can directly verify against attestations without relying on the coordinator's certificate:
 
 ```
-function VerifyBlockWithDirectAttestation(block, attestation, expectedMeasurements) {
-    // 1. Verify the attestation is valid
-    if !VerifyAttestation(attestation) {
+function VerifyBlockWithDirectAttestation(block, tdxQuote, endorsements, expectedMeasurements, signingPublicKey) {
+    // 1. Verify the DCAP attestation signature with Intel endorsements
+    if !VerifyAttestationSignature(tdxQuote, endorsements) {
         return false
     }
     
-    // 2. Extract workload identity from attestation
-    workloadIdentity = DeriveWorkloadIdentity(attestation)
+    // 2. Derive workload identity from TDX quote
+    workloadIdentity = DeriveWorkloadIdentity(tdxQuote)
     
     // 3. Verify workload identity is authorized
     if !IsExpectedMeasurement(workloadIdentity, expectedMeasurements) {
         return false
     }
     
-    // 4. Extract the public key from attestation user data
-    publicKey = ExtractPublicKey(attestation.UserData)
+    // 4. Verify the public key hash in quote matches the provided signing public key
+    reportData = tdxQuote.TDReport.ReportData
+    publicKeyHash = SHA256(signingPublicKey)
+    if !ConstantTimeEquals(reportData[:32], publicKeyHash) {
+        return false
+    }
     
     // 5. Get the final signature transaction
     signatureTx = block.transactions[block.transactions.length - 1]
@@ -177,8 +196,8 @@ function VerifyBlockWithDirectAttestation(block, attestation, expectedMeasuremen
     // 8. Compute the signature target
     computedTarget = ComputeSignatureTarget(block, normalTransactions)
     
-    // 9. Verify the signature using the public key
-    if !ECDSA_Verify(publicKey, computedTarget, signature) {
+    // 9. Verify the signature using the signing public key
+    if !ECDSA_Verify(signingPublicKey, computedTarget, signature) {
         return false
     }
     
@@ -264,9 +283,22 @@ A command-line tool is provided for manual verification of blocks:
 ```
 verify-tee-block \
   --block-file=block.json \
-  --signature-file=signature.bin \
-  --certificate-file=builder-cert.pem \
+  --mode=pki \
+  --signing-cert-file=builder-signing-cert.pem \
   --ca-cert-file=coordinator-ca.pem \
+  --endorsements-file=intel-endorsements.json \
+  --expected-measurements-file=measurements.json
+```
+
+For direct attestation verification, the tool can be used with the quote directly:
+
+```
+verify-tee-block \
+  --block-file=block.json \
+  --mode=direct \
+  --tdx-quote-file=quote.bin \
+  --signing-public-key=key.pem \
+  --endorsements-file=intel-endorsements.json \
   --expected-measurements-file=measurements.json
 ```
 
