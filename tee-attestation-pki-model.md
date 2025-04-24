@@ -73,9 +73,9 @@ A TEE's workload identity is derived from a combination of its measurement regis
 struct TDXMeasurements {
     bytes MRTD;             // Initial TD measurement (boot loader, initial data)
     bytes[4] RTMR;          // Runtime measurements (extended at runtime)
-    bytes MROWNER;          // Owner measurement (trusted policies)
-    bytes MRCONFIGID;       // Configuration ID (unique ID of the VVD/configuration)
-    bytes MROWNERCONFIG;    // Owner-defined configuration (includes authorized pubkeys)
+    bytes MROWNER;
+    bytes MRCONFIGID;
+    bytes MROWNERCONFIG;
 }
 ```
 
@@ -87,27 +87,20 @@ function ComputeTDXWorkloadIdentity(quote *TDXQuote) ([32]byte, error) {
     tdReport := quote.TDReport
     
     // Primary identity is derived from measurement registers
-    // RTMRs contain the runtime measurements of the workload code
-    // MROWNER contains the TD owner's policy
-    // MROWNERCONFIG contains the owner-defined configuration
     identity := SHA256(
+        tdReport.MRTD    || 
         tdReport.RTMR[0] || 
         tdReport.RTMR[1] || 
         tdReport.RTMR[2] || 
         tdReport.RTMR[3] ||
         tdReport.MROWNER ||
-        tdReport.MROWNERCONFIG
+        tdReport.MROWNERCONFIG ||
+        tdReport.MRCONFIGID
     )
     
     return identity
 }
 ```
-
-The MROWNERCONFIG register is particularly important as it can contain:
-- References to authorized administrator public keys
-- Network configuration parameters
-- Access control policies
-- Other runtime configuration values
 
 All of these values are captured in the workload identity hash, ensuring that any change to the configuration results in a different identity that must be explicitly authorized.
 

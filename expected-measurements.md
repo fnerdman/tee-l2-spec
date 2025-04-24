@@ -31,12 +31,14 @@ From these hardware measurements, a deterministic workload identity is derived:
 ```
 function DeriveWorkloadIdentity(measurements TDXMeasurements) bytes32 {
     return SHA256(
+        measurements.MRTD    ||
         measurements.RTMR[0] ||
         measurements.RTMR[1] || 
         measurements.RTMR[2] || 
         measurements.RTMR[3] ||
         measurements.MROWNER ||
-        measurements.MROWNERCONFIG
+        measurements.MROWNERCONFIG ||
+        measurements.MRCONFIGID
     );
 }
 ```

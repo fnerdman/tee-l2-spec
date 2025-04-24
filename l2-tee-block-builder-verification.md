@@ -153,30 +153,26 @@ This approach enables deterministic key recovery and creates a cryptographic bin
 When producing blocks, the TEE-protected block builder:
 
 1. Generates a block according to the L2 protocol rules
-2. Computes a signature target by hashing all transaction hashes in order, along with block metadata
+2. Computes a signature target by hashing all transaction hashes in order, along with block metadata (parent hash, block number, and timestamp)
 3. Signs this signature target with its private key (derived from the coordinator-provided seed)
 4. Adds the signature as a final transaction in the block
-5. The signature transaction, along with verification material, forms a "TEE proof"
+5. The signature transaction, together with the appropriate verification material, enables verification of block authenticity
 
-### TEE Proof Structure
+### Block Verification Material
 
-The signature is included as the final transaction in the block. There are two types of TEE proofs depending on the verification model:
+For block verification, the signature is included as the final transaction in the block, while additional verification material depends on the verification model:
 
-#### PKI-based TEE Proof
-```
-struct PKITEEProof {
-    bytes signature;         // Signature over computed transaction hash using TEE-protected key
-    bytes certificate;       // X.509 certificate signed by coordinator
-}
-```
+#### PKI-based Verification
+For the PKI-based approach, verification requires:
+- The block with its signature transaction
+- The X.509 certificate of the block builder (signed by the coordinator)
+- The coordinator's CA certificate (for the trust chain)
 
-#### Direct Attestation TEE Proof
-```
-struct DirectTEEProof {
-    bytes signature;         // Signature over computed transaction hash using TEE-protected key
-    bytes32 attestationHash; // Hash of the attestation record stored on-chain
-}
-```
+#### Direct Attestation Verification
+For direct attestation, verification requires:
+- The block with its signature transaction
+- The attestation record of the block builder
+- Expected measurements for verification
 
 The signature transaction itself has this structure:
 ```
@@ -195,32 +191,37 @@ SignatureTransaction {
 To verify a block with a PKI-based TEE proof:
 
 ```
-function VerifyBlockWithPKI(block, teeProof, coordinatorPublicKeys, expectedMeasurements) {
-    // 1. Get the final signature transaction
+function VerifyBlockWithPKI(block, certificate, coordinatorCACert) {
+    // 1. Verify the certificate was signed by a trusted coordinator
+    if !VerifyCertificateChain(certificate, coordinatorCACert) {
+        return false
+    }
+    
+    // 2. Extract the builder's public key from the certificate
+    publicKey = certificate.PublicKey
+    
+    // 3. Get the final signature transaction
     signatureTx = block.transactions[block.transactions.length - 1]
     
-    // 2. Extract signature from the transaction
+    // 4. Extract signature from the transaction
     signature = abi.decode(signatureTx.data)
     
-    // 3. Get regular transactions (all except signature transaction)
-    regularTxs = block.transactions.slice(0, block.transactions.length - 1)
+    // 5. Get all transactions except the final signature transaction
+    normalTransactions = block.transactions.slice(0, block.transactions.length - 1)
     
-    // 4. Compute hash of all regular transaction hashes
-    computedTarget = HashTransactions(regularTxs, block)
+    // 6. Compute the signature target
+    computedTarget = ComputeSignatureTarget(block, normalTransactions)
     
-    // 5. Verify certificate was signed by an authorized coordinator
-    if !VerifyCertificateSignature(teeProof.certificate, coordinatorPublicKeys) {
+    // 7. Verify the signature using the public key
+    if !ECDSA_Verify(publicKey, computedTarget, signature) {
         return false
     }
     
-    // 6. Verify signature using certificate's public key
-    if !VerifySignature(computedTarget, signature, teeProof.certificate.PublicKey) {
+    // 8. (Optional) Extract and verify workload identity from certificate
+    workloadIdentity = certificate.Extensions["WorkloadIdentity"]
+    if !IsExpectedMeasurement(workloadIdentity) {
         return false
     }
-    
-    // Note: No explicit workload identity verification is needed here
-    // as the coordinator has already verified the attestation during
-    // certificate issuance
     
     return true
 }

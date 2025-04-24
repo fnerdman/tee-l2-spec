@@ -45,7 +45,6 @@ When building a block, the TEE block builder:
        // This ensures the signature covers the exact transaction set and order
        return keccak256(abi.encode(
            block.parentHash,
-           block.stateRoot,
            block.number,
            block.timestamp,
            transactionHashes
@@ -54,6 +53,16 @@ When building a block, the TEE block builder:
    
    signatureTarget = ComputeSignatureTarget(block, block.transactions)
    ```
+
+   This signature target formulation provides a balance between rollup compatibility and verification strength:
+   
+   - Contains the minimal set of elements needed to uniquely identify a block's contents
+   - Compatible with data available on L1 for most optimistic and ZK rollup implementations
+   - Enables signature verification without requiring state root dependencies
+   - Supports future L1 verification of block authenticity across different rollup designs
+   
+   By focusing on transaction ordering and chain position rather than state transitions, this approach offers practical verification capabilities for TEE-produced blocks.
+
 3. Signs the signature target using its private key:
    ```
    signature = ECDSA_Sign(privateKey, signatureTarget)
@@ -94,7 +103,7 @@ Blocks can be verified using one of two methods, depending on the verification m
 In the PKI model, verifiers use the coordinator's CA certificate to establish a chain of trust:
 
 ```
-function VerifyBlockWithPKI(block, signature, certificate, coordinatorCACert) {
+function VerifyBlockWithPKI(block, certificate, coordinatorCACert) {
     // 1. Verify the certificate was signed by a trusted coordinator
     if !VerifyCertificateChain(certificate, coordinatorCACert) {
         return false
@@ -103,18 +112,24 @@ function VerifyBlockWithPKI(block, signature, certificate, coordinatorCACert) {
     // 2. Extract the builder's public key from the certificate
     publicKey = certificate.PublicKey
     
-    // 3. Get all transactions except the final signature transaction
+    // 3. Get the final signature transaction
+    signatureTx = block.transactions[block.transactions.length - 1]
+    
+    // 4. Extract signature from the transaction
+    signature = abi.decode(signatureTx.data)
+    
+    // 5. Get all transactions except the final signature transaction
     normalTransactions = block.transactions.slice(0, block.transactions.length - 1)
     
-    // 4. Compute the signature target
+    // 6. Compute the signature target
     computedTarget = ComputeSignatureTarget(block, normalTransactions)
     
-    // 5. Verify the signature using the public key
+    // 7. Verify the signature using the public key
     if !ECDSA_Verify(publicKey, computedTarget, signature) {
         return false
     }
     
-    // 6. (Optional) Extract and verify workload identity from certificate
+    // 8. (Optional) Extract and verify workload identity from certificate
     workloadIdentity = certificate.Extensions["WorkloadIdentity"]
     if !IsExpectedMeasurement(workloadIdentity) {
         return false
@@ -129,7 +144,7 @@ function VerifyBlockWithPKI(block, signature, certificate, coordinatorCACert) {
 For higher security use cases, verifiers can directly verify against attestations:
 
 ```
-function VerifyBlockWithDirectAttestation(block, signature, attestation, expectedMeasurements) {
+function VerifyBlockWithDirectAttestation(block, attestation, expectedMeasurements) {
     // 1. Verify the attestation is valid
     if !VerifyAttestation(attestation) {
         return false
@@ -146,13 +161,19 @@ function VerifyBlockWithDirectAttestation(block, signature, attestation, expecte
     // 4. Extract the public key from attestation user data
     publicKey = ExtractPublicKey(attestation.UserData)
     
-    // 5. Get all transactions except the final signature transaction
+    // 5. Get the final signature transaction
+    signatureTx = block.transactions[block.transactions.length - 1]
+    
+    // 6. Extract signature from the transaction
+    signature = abi.decode(signatureTx.data)
+    
+    // 7. Get all transactions except the final signature transaction
     normalTransactions = block.transactions.slice(0, block.transactions.length - 1)
     
-    // 6. Compute the signature target
+    // 8. Compute the signature target
     computedTarget = ComputeSignatureTarget(block, normalTransactions)
     
-    // 7. Verify the signature using the public key
+    // 9. Verify the signature using the public key
     if !ECDSA_Verify(publicKey, computedTarget, signature) {
         return false
     }
@@ -173,9 +194,15 @@ Rollup Boost serves as a block builder sidecar for L2 chains, connecting the seq
 2. **Block Request and Verification**:
    - When Rollup Boost receives a block from the builder:
      ```
-     function VerifyBuilderBlock(block, signature) {
+     function VerifyBuilderBlock(block) {
          // Use the public key obtained during TLS handshake
          publicKey = storedTLSCertificate.PublicKey
+         
+         // Get the final signature transaction
+         signatureTx = block.transactions[block.transactions.length - 1]
+         
+         // Extract signature from the transaction
+         signature = abi.decode(signatureTx.data)
          
          // Get all transactions except the final signature transaction
          normalTransactions = block.transactions.slice(0, block.transactions.length - 1)
@@ -197,37 +224,7 @@ This verification process ensures that:
 - The block signature verification uses the same public key as the TLS connection
 - There's end-to-end verification from block production to inclusion in the L2 chain
 
-### Signature Transaction Verification
-
-When blocks contain the signature as a final transaction (as described earlier), Rollup Boost must also:
-
-```
-function VerifySignatureTransaction(block) {
-    // Get the final transaction
-    finalTx = block.transactions[block.transactions.length - 1]
-    
-    // Check it's a signature transaction
-    if finalTx.to != TEE_SIGNATURE_CONTRACT_ADDRESS || finalTx.from != TEE_BUILDER_ADDRESS {
-        return false
-    }
-    
-    // Decode the signature data
-    signature = abi.decode(finalTx.data)
-    
-    // Extract all transactions except the final signature transaction
-    normalTransactions = block.transactions.slice(0, block.transactions.length - 1)
-    
-    // Compute signatureTarget from block data and transactions
-    // Uses the same algorithm as during signing
-    computedTarget = ComputeSignatureTarget(block, normalTransactions)
-    
-    // Verify the signature using the builder's public key
-    builderPublicKey = storedTLSCertificate.PublicKey
-    return ECDSA_Verify(builderPublicKey, computedTarget, signature)
-}
-```
-
-This verification ensures that:
+This verification process additionally ensures that:
 1. The signature transaction is properly formatted
 2. The signature covers the block without the final transaction
 3. The signature is valid for the attested TEE block builder
