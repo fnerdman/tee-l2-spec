@@ -302,27 +302,17 @@ The ephemeral TLS certificate is used solely for secure communications:
 ```
 X.509 Certificate {
     Version: 3
-    Serial Number: <Random value>
     Subject: CN=BlockBuilderNode-TLS, O=L2TEEBuilder
     Issuer: CN=TEECoordinator, O=L2TEECoordinator
-    Validity:
-        Not Before: <Issue time>
-        Not After: <Issue time + 7 days>
-    Subject Public Key Info:
-        Public Key Algorithm: ECDSA
-        Public Key: <Builder's ephemeral TLS public key>
+    Validity: <Issue time> to <Issue time + 7 days>
+    Subject Public Key Info: <Builder's ephemeral TLS public key>
     Extensions:
-        SubjectAltName:
-            DNS: builder.example.com
-            IP: 192.0.2.1
-        Authority Key Identifier: <Coordinator key ID>
-        Subject Key Identifier: <TLS key ID>
-        X509v3 Extended Key Usage:
-            TLS Web Server Authentication
-            TLS Web Client Authentication
-        Custom Extension OID 1.3.6.1.4.1.12345.1.1: <WorkloadIdentity>
-        Custom Extension OID 1.3.6.1.4.1.12345.1.2: <OperatorID> (optional)
-    Signature Algorithm: ECDSA-SHA256
+        SubjectAltName: DNS:builder.example.com, IP:192.0.2.1
+        ...
+        X509v3 Extended Key Usage: TLS Web Server Authentication, TLS Web Client Authentication
+        
+        # TDX attestation data included as certificate extension
+        Custom Extension OID 1.3.6.1.4.1.12345.1.1: <TDX Quote>
     Signature: <Coordinator's signature>
 }
 ```
@@ -334,21 +324,15 @@ The deterministically derived block signing certificate is used for signing bloc
 ```
 X.509 Certificate {
     Version: 3
-    Serial Number: <Random value>
     Subject: CN=BlockBuilderNode-Signer, O=L2TEEBuilder
     Issuer: CN=TEECoordinator, O=L2TEECoordinator
-    Validity:
-        Not Before: <Issue time>
-        Not After: <Issue time + 30 days>
-    Subject Public Key Info:
-        Public Key Algorithm: ECDSA
-        Public Key: <Builder's deterministic signing public key>
+    Validity: <Issue time> to <Issue time + 30 days>
+    Subject Public Key Info: <Builder's deterministic signing public key>
     Extensions:
-        Authority Key Identifier: <Coordinator key ID>
-        Subject Key Identifier: <Signing key ID>
-        Custom Extension OID 1.3.6.1.4.1.12345.1.1: <WorkloadIdentity>
-        Custom Extension OID 1.3.6.1.4.1.12345.1.2: <OperatorID> (optional)
-    Signature Algorithm: ECDSA-SHA256
+        ...
+        
+        # TDX attestation data included as certificate extension
+        Custom Extension OID 1.3.6.1.4.1.12345.1.1: <TDX Quote>
     Signature: <Coordinator's signature>
 }
 ```
