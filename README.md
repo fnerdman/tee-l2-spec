@@ -298,7 +298,7 @@ flowchart TD
     
     %% PKI Model
     PKI --- A1
-    A1[TEE Block Builder] -->|1. Attestation| B1[TEE Coordinator/CA]
+    A1[TEE Block Builder] -->|Attestation| B1[TEE Coordinator/CA]
     B1 -->|2. Issues certificate| A1
     A1 -->|3. Signs block| C1[Block with Signature]
     C1 -->|4. Block + Certificate| D1[Verifier]
