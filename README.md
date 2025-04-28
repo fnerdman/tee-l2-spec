@@ -40,7 +40,7 @@
 
 ## Introduction
 
-This specification describes the attestation and verification protocol for TEE-based L2 block builders. The protocol enables verifiable and transparent guarantees of block production within Trusted Execution Environments (TEEs), allowing any party to verify that blocks were produced according to the expected rules without trusting the operator.
+This specification describes the attestation and verification protocol for TEE-based L2 block builders. The protocol enables verifiable and transparent guarantees of block production within TEEs, allowing any party to verify that blocks were produced according to the expected rules without trusting the operator.
 
 ## Design Goals
 
@@ -97,7 +97,7 @@ The attestation process follows these steps:
 
 ### Attestation Endorsements
 
-To validate a TDX Quote, a verifier needs these endorsements:
+To validate a TDX Quote, a verifier needs these simplified endorsements:
 
 ```
 DCAPEndorsements {
@@ -157,21 +157,12 @@ The system uses a permissioned model where operators must be explicitly authoriz
 1. The **MROWNER** field containing the operator's public key
 2. The **MROWNERCONFIG** field containing a unique instance ID chosen by the operator
 
-During TEE initialization, the operator must authenticate itself by providing a signature of the instance ID using the private key corresponding to the public key in MROWNER. This signature is delivered through a secure channel (cloud-init, virtio, attested TLS, etc.). The TEE verifies this signature before proceeding with registration.
+During TEE initialization, the operator must authenticate itself by providing a signature of the instance ID using the private key corresponding to the public key in MROWNER. This signature is delivered through a secure channel (cloud-init, shared mount, attested TLS, etc.). The TEE verifies this signature before proceeding with registration.
 
 This approach ensures that:
 - Only authorized operators can run specific workloads
 - Each TEE instance has a unique, operator-authenticated identity
 - The TEE self-enforces operator authentication before operation
-
-For additional security, an extended identity can be computed:
-
-```
-function ComputeExtendedIdentity(workloadIdentity [32]byte, operatorAddress [20]byte) ([32]byte, error) {
-    // Combine workload and operator identity
-    return SHA256(workloadIdentity || operatorAddress)
-}
-```
 
 ### Dual Certificate Model and Key Derivation
 
