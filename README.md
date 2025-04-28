@@ -300,7 +300,7 @@ flowchart TD
     PKI --- A1
     A1[TEE Block Builder] -->|Attestation| B1[TEE Coordinator/CA]
     B1 -->|"2. Issues certificate"| A1
-    A1 -->|3. Signs block| C1[Block with Signature]
+    A1 -->|'3. Signs block'| C1[Block with Signature]
     C1 -->|4. Block + Certificate| D1[Verifier]
     D1 -->|5. Verifies cert chain| B1
     D1 -->|6. Verifies signature| C1
