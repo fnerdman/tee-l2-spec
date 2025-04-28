@@ -314,18 +314,18 @@ flowchart TD
     C2 -->|5 - Retrieve Attestation| E2
     E2 -->|6 - Verify against registry| C2
     
-    %% Styles
+%% Styles
     classDef header fill:#333,color:#fff,stroke:#333,stroke-width:2px
-    style A1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
-    style B1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
-    style C1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
-    style D1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
-    
-    style A2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
-    style B2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
-    style C2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
-    style D2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
-    style E2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
+    style A1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px,color:#000
+    style B1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px,color:#000
+    style C1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px,color:#000
+    style D1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px,color:#000
+
+    style A2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px,color:#000
+    style B2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px,color:#000
+    style C2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px,color:#000
+    style D2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px,color:#000
+    style E2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px,color:#000
 ```
 
 #### PKI-based Verification
