@@ -922,34 +922,6 @@ As an alternative:
 
 This model eliminates the CA component but requires verifiers to process more complex attestation data. It is generally preferred for high-security environments where elimination of intermediaries is desired. The implementation details are covered in the [Block Verification](#block-verification) section under Direct Attestation Verification.
 
-## Verification Tool
-
-A command-line tool is provided for manual verification of blocks:
-
-```
-verify-tee-block \
-  --block-file=block.json \
-  --mode=pki \
-  --signing-cert-file=builder-signing-cert.pem \
-  --ca-cert-file=coordinator-ca.pem \
-  --endorsements-file=intel-endorsements.json \
-  --expected-measurements-file=measurements.json
-```
-
-For direct attestation verification, the tool can be used with the quote directly:
-
-```
-verify-tee-block \
-  --block-file=block.json \
-  --mode=direct \
-  --tdx-quote-file=quote.bin \
-  --signing-public-key=key.pem \
-  --endorsements-file=intel-endorsements.json \
-  --expected-measurements-file=measurements.json
-```
-
-The verification tool supports both PKI-based and direct attestation verification modes, allowing operators and users to independently verify that blocks were produced by attested TEE environments.
-
 ## Security Considerations
 
 Several security considerations apply to the TEE block builder verification protocol:
