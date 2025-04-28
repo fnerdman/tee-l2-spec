@@ -954,24 +954,22 @@ The verification tool supports both PKI-based and direct attestation verificatio
 
 Several security considerations apply to the TEE block builder verification protocol:
 
-1. **Measurement Precision**: Measurements must be specific enough to identify the exact code but flexible enough to allow for irrelevant variations (like build timestamps)
+1. **Update Timing**: Updates must be scheduled to allow sufficient time for verification but quick enough to address security issues
 
-2. **Update Timing**: Updates must be scheduled to allow sufficient time for verification but quick enough to address security issues
+2. **Revocation**: The system must allow for emergency revocation of compromised measurements
 
-3. **Revocation**: The system must allow for emergency revocation of compromised measurements
+3. **Governance Security**: The governance mechanism for updating measurements must be secure against takeover attempts
 
-4. **Governance Security**: The governance mechanism for updating measurements must be secure against takeover attempts
+4. **Build Reproducibility**: Minor differences in build environments can lead to different measurements, creating false negatives in verification
 
-5. **Build Reproducibility**: Minor differences in build environments can lead to different measurements, creating false negatives in verification
+5. **Certificate Revocation**: Certificates have a short validity period (e.g., 7 days) to minimize the impact of key compromise. Additionally, a certificate revocation list (CRL) is maintained by the coordinator.
 
-6. **Certificate Revocation**: Certificates have a short validity period (e.g., 7 days) to minimize the impact of key compromise. Additionally, a certificate revocation list (CRL) is maintained by the coordinator.
+6. **Time of Check/Time of Use (TOCTOU)**: Block verification checks that the workload identity was valid at the time the block was produced, preventing attacks where a malicious operator might try to use a revoked measurement.
 
-7. **Time of Check/Time of Use (TOCTOU)**: Block verification checks that the workload identity was valid at the time the block was produced, preventing attacks where a malicious operator might try to use a revoked measurement.
+7. **Replay Protection**: Block signatures include block numbers and parent hashes, preventing replay attacks where an attacker might try to reuse signatures from previous blocks.
 
-8. **Replay Protection**: Block signatures include block numbers and parent hashes, preventing replay attacks where an attacker might try to reuse signatures from previous blocks.
+8. **Key Rotation**: Even though keys are derived deterministically, regular rotation schedules can be implemented by including a time component in the seed derivation.
 
-9. **Key Rotation**: Even though keys are derived deterministically, regular rotation schedules can be implemented by including a time component in the seed derivation.
+9. **Endorsement Freshness**: DCAP endorsements have validity periods. Verifiers must ensure they use up-to-date endorsements from Intel's PCS.
 
-10. **Endorsement Freshness**: DCAP endorsements have validity periods. Verifiers must ensure they use up-to-date endorsements from Intel's PCS.
-
-11. **Chain of Trust**: The security of the entire system depends on the integrity of the attestation mechanism, the correctness of expected measurements, and the proper implementation of the verification protocol.
+10. **Chain of Trust**: The security of the entire system depends on the integrity of the attestation mechanism, the correctness of expected measurements, and the proper implementation of the verification protocol.
