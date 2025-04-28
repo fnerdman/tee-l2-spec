@@ -238,7 +238,7 @@ When building a block, the TEE block builder:
    signature = ECDSA_Sign(privateKey, signatureTarget)
    ```
 
-**Figure 2: Block Signing Process**
+**Figure 1: Block Signing Process**
 
 ![Block Signing Process](block-signing-process.svg)
 
@@ -287,6 +287,46 @@ For direct attestation, verification requires:
 ### Block Verification
 
 Blocks can be verified using one of two methods, depending on the verification model used:
+
+**Figure 2: Block Verification Comparison**
+
+```mermaid
+flowchart TD
+    %% Headers
+    PKI[PKI Verification Model]:::header
+    DIRECT[Direct Attestation Model]:::header
+    
+    %% PKI Model
+    PKI --- A1
+    A1[TEE Block Builder] -->|1. Attestation| B1[TEE Coordinator/CA]
+    B1 -->|2. Issues certificate| A1
+    A1 -->|3. Signs block| C1[Block with Signature]
+    C1 -->|4. Block + Certificate| D1[Verifier]
+    D1 -->|5. Verifies cert chain| B1
+    D1 -->|6. Verifies signature| C1
+    
+    %% Direct Attestation Model
+    DIRECT --- A2
+    A2[TEE Block Builder] -->|1. Generates quote| B2[Attestation Record]
+    B2 -->|2. Register on chain| C2[On-Chain Registry]
+    A2 -->|3. Signs block| D2[Block with Signature]
+    D2 -->|4. Block + Quote Reference| E2[Verifier]
+    C2 -->|5. Retrieve Attestation| E2
+    E2 -->|6. Verify against registry| C2
+    
+    %% Styles
+    classDef header fill:#333,color:#fff,stroke:#333,stroke-width:2px
+    style A1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
+    style B1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
+    style C1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
+    style D1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
+    
+    style A2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
+    style B2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
+    style C2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
+    style D2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
+    style E2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
+```
 
 #### PKI-based Verification
 
@@ -344,7 +384,7 @@ function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, endors
 }
 ```
 
-### Direct Attestation Verification
+#### Direct Attestation Verification
 
 For higher security use cases, verifiers can directly verify against attestations without relying on the coordinator's certificate:
 
@@ -470,7 +510,7 @@ When a block builder node starts:
 
 This two-stage process ensures that both certificates are cryptographically bound to the same attested TEE, while serving their distinct purposes.
 
-**Figure 1: Certificate Issuance Process**
+**Figure 3: Certificate Issuance Process**
 
 ```mermaid
 sequenceDiagram
@@ -881,48 +921,6 @@ As an alternative:
 3. Verifiers check attestations against on-chain expected measurements
 
 This model eliminates the CA component but requires verifiers to process more complex attestation data. It is generally preferred for high-security environments where elimination of intermediaries is desired. The implementation details are covered in the [Block Verification](#block-verification) section under Direct Attestation Verification.
-
-**Figure 3: Verification Models Comparison**
-
-![Verification Models Comparison](images/verification-models-comparison.svg)
-
-```mermaid
-flowchart TD
-    %% Headers
-    PKI[PKI Verification Model]:::header
-    DIRECT[Direct Attestation Model]:::header
-    
-    %% PKI Model
-    PKI --- A1
-    A1[TEE Block Builder] -->|1. Attestation| B1[TEE Coordinator/CA]
-    B1 -->|2. Issues certificate| A1
-    A1 -->|3. Signs block| C1[Block with Signature]
-    C1 -->|4. Block + Certificate| D1[Verifier]
-    D1 -->|5. Verifies cert chain| B1
-    D1 -->|6. Verifies signature| C1
-    
-    %% Direct Attestation Model
-    DIRECT --- A2
-    A2[TEE Block Builder] -->|1. Generates quote| B2[Attestation Record]
-    B2 -->|2. Register on chain| C2[On-Chain Registry]
-    A2 -->|3. Signs block| D2[Block with Signature]
-    D2 -->|4. Block + Quote Reference| E2[Verifier]
-    C2 -->|5. Retrieve Attestation| E2
-    E2 -->|6. Verify against registry| C2
-    
-    %% Styles
-    classDef header fill:#333,color:#fff,stroke:#333,stroke-width:2px
-    style A1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
-    style B1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
-    style C1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
-    style D1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px
-    
-    style A2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
-    style B2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
-    style C2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
-    style D2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
-    style E2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px
-```
 
 ## Verification Tool
 
