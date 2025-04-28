@@ -298,21 +298,21 @@ flowchart TD
     
     %% PKI Model
     PKI --- A1
-    A1[TEE Block Builder] -->|Attestation| B1[TEE Coordinator/CA]
-    B1 -->|"2. Issues certificate"| A1
-    A1 -->|'3. Signs block'| C1[Block with Signature]
+    A1[TEE Block Builder] -->|1 - Attestation| B1[TEE Coordinator/CA]
+    B1 -->|2 - Issues certificate| A1
+    A1 -->|3 - Signs block| C1[Block with Signature]
     C1 -->|4 - Block + Certificate| D1[Verifier]
-    D1 -->|5. Verifies cert chain| B1
-    D1 -->|6. Verifies signature| C1
+    D1 -->|5 - Verifies cert chain| B1
+    D1 -->|6 - Verifies signature| C1
     
     %% Direct Attestation Model
     DIRECT --- A2
-    A2[TEE Block Builder] -->|1. Generates quote| B2[Attestation Record]
-    B2 -->|2. Register on chain| C2[On-Chain Registry]
-    A2 -->|3. Signs block| D2[Block with Signature]
-    D2 -->|4. Block + Quote Reference| E2[Verifier]
-    C2 -->|5. Retrieve Attestation| E2
-    E2 -->|6. Verify against registry| C2
+    A2[TEE Block Builder] -->|1 - Generates quote| B2[Attestation Record]
+    B2 -->|2 - Register on chain| C2[On-Chain Registry]
+    A2 -->|3 - Signs block| D2[Block with Signature]
+    D2 -->|4 - Block + Quote Reference| E2[Verifier]
+    C2 -->|5 - Retrieve Attestation| E2
+    E2 -->|6 - Verify against registry| C2
     
     %% Styles
     classDef header fill:#333,color:#fff,stroke:#333,stroke-width:2px
