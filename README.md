@@ -166,27 +166,19 @@ This approach ensures that:
 
 ### Dual Certificate Model and Key Derivation
 
-The block builder uses two separate certificates:
+The block builder utilizes two separate certificates for different purposes:
 
-1. **TLS Certificate**: An ephemeral certificate for secure communications
-2. **Block Signing Certificate**: A deterministically derived certificate for signing blocks
+1. **TLS Certificate**: Ephemeral certificate used for secure communications
+2. **Block Signing Certificate**: Deterministically derived and used for signing blocks
 
-The block signing key derivation process uses a deterministic approach:
-
-1. When a block builder node starts, it first generates an ephemeral TLS key pair
-2. It includes the hash of the TLS public key in the attestation quote's UserData field
-3. It sends the attestation quote and TLS public key to the coordinator
-4. The coordinator verifies the attestation and issues a TLS certificate
-5. Over the secure TLS connection, the coordinator derives a unique seed for the block builder:
-   `derived_seed = HMAC-SHA256(coordinator_master_seed, workload_identity)`
-6. The coordinator securely transmits this derived seed to the block builder
-7. The block builder uses this seed to deterministically generate its signing key pair inside the TEE
-8. The block builder creates a CSR with this signing key pair and sends it to the coordinator
-9. The coordinator signs the block signing certificate and returns it
-
-This approach enables deterministic key recovery for the signing key and creates a cryptographic binding between the attestation and both certificates.
+Both certificates are generated within the attested TEE and signed by the coordinator, but they serve different purposes and have different properties. This approach enables deterministic key recovery for the signing key and creates a cryptographic binding between the attestation and both certificates. For more details, see the [Dual Certificate Model](#dual-certificate-model) section.
+This is an opinionated approach and isn’t strictly necessary. One could also use the ephemeral TLS key. However using the key for two different communication channels is generally considered bad practice and a potential security issue.
 
 ## Block Signatures and Verification
+
+**Figure 1: Block Signing Process**
+
+![Block Signing Process](block-signing-process.svg)
 
 ### Block Signing Process
 
@@ -228,10 +220,6 @@ When building a block, the TEE block builder:
    ```
    signature = ECDSA_Sign(privateKey, signatureTarget)
    ```
-
-**Figure 1: Block Signing Process**
-
-![Block Signing Process](block-signing-process.svg)
 
 ### Signature Inclusion within Block
 
@@ -472,7 +460,9 @@ The block builder utilizes two separate certificates for different purposes:
 1. **TLS Certificate**: Ephemeral certificate used for secure communications
 2. **Block Signing Certificate**: Deterministically derived and used for signing blocks
 
-Both certificates are generated within the attested TEE and signed by the coordinator, but they serve different purposes and have different properties. For more details, see the [Dual Certificate Model and Key Derivation](#dual-certificate-model-and-key-derivation) section.
+Both certificates are generated within the attested TEE and signed by the coordinator, but they serve different purposes and have different properties.
+
+This is an opinionated approach and isn’t strictly necessary. One could also use the ephemeral TLS key. However using the key for two different communication channels is generally considered bad practice and a potential security issue.
 
 ### Certificate Issuance Process
 
@@ -889,29 +879,6 @@ The update process ensures that:
 1. The security of the system is maintained during transitions
 2. Users have sufficient notice of pending changes
 3. Independent verification is possible before adoption
-
-## Verification Models
-
-The protocol supports two verification models:
-
-### 1. PKI Model with TEE Coordinator
-
-In this model:
-1. A coordinator running in a TEE serves as a Certificate Authority
-2. The coordinator verifies quotes against expected measurements
-3. If valid, the coordinator signs certificates for block builders
-4. Verifiers trust certificates signed by the coordinator
-
-This approach simplifies verification for light clients but introduces the coordinator as a component. This model is described in detail in the [Certificate Authority Model](#certificate-authority-model) section.
-
-### 2. Direct On-Chain Attestation
-
-As an alternative:
-1. Block builders publish their attestations directly on-chain
-2. Block proofs reference these attestations by hash
-3. Verifiers check attestations against on-chain expected measurements
-
-This model eliminates the CA component but requires verifiers to process more complex attestation data. It is generally preferred for high-security environments where elimination of intermediaries is desired. The implementation details are covered in the [Block Verification](#block-verification) section under Direct Attestation Verification.
 
 ## Security Considerations
 
