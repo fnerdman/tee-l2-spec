@@ -357,17 +357,17 @@ After adding the signature transaction, the final block and signature are sent t
 
 ### Block Verification Material
 
-For block verification, the signature is included as the final transaction in the block, while additional verification material depends on the verification model:
+For block verification, the [SignatureTransaction](#signaturetransaction) is included as the final transaction in the block, while additional verification material depends on the verification model:
 
 #### PKI-based Verification
 For the PKI-based approach, verification requires:
-- The block with its signature transaction
-- The X.509 certificate of the block builder (signed by the coordinator)
+- The block with its [SignatureTransaction](#signaturetransaction)
+- The Block Signing Certificate of the block builder (signed by the coordinator)
 - The coordinator's CA certificate (for the trust chain)
 
 #### Direct Attestation Verification
 For direct attestation, verification requires:
-- The block with its signature transaction
+- The block with its [SignatureTransaction](#signaturetransaction)
 - The attestation record of the block builder
 - Expected measurements for verification
 
@@ -422,7 +422,7 @@ In the PKI model, verifiers use the coordinator's CA certificate to establish a 
 The verification function below uses the [TDXQuote](#tdxquote) and [TDReport](#tdreport) structures:
 
 ```
-function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, endorsements) {
+function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, dcapEndorsements) {
     // 1. Verify the signing certificate was signed by a trusted coordinator
     if !VerifyCertificateChain(signingCertificate, coordinatorCACert) {
         return false
@@ -451,8 +451,8 @@ function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, endors
     // 8. Verify the TDX attestation from certificate extension
     tdxQuote = signingCertificate.Extensions["TDXQuote"]
     
-    // 8a. Verify the DCAP attestation signature with Intel endorsements
-    if !VerifyAttestationSignature(tdxQuote, endorsements) {
+    // 8a. Verify the DCAP attestation signature with Intel DCAP endorsements
+    if !VerifyAttestationSignature(tdxQuote, dcapEndorsements) {
         return false
     }
     
@@ -463,9 +463,9 @@ function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, endors
         return false
     }
     
-    // 8c. Derive and verify workload identity against expected measurements
+    // 8c. Derive and verify workload identity against ExpectedMeasurement records
     workloadIdentity = DeriveWorkloadIdentity(tdxQuote)
-    if !IsExpectedMeasurement(workloadIdentity) {
+    if !MatchesExpectedMeasurement(workloadIdentity) {
         return false
     }
     
@@ -480,9 +480,9 @@ For higher security use cases, verifiers can directly verify against attestation
 This verification approach also uses the [TDXQuote](#tdxquote) structure:
 
 ```
-function VerifyBlockWithDirectAttestation(block, tdxQuote, endorsements, expectedMeasurements, signingPublicKey) {
+function VerifyBlockWithDirectAttestation(block, tdxQuote, dcapEndorsements, expectedMeasurements, signingPublicKey) {
     // 1. Verify the DCAP attestation signature with Intel endorsements
-    if !VerifyAttestationSignature(tdxQuote, endorsements) {
+    if !VerifyAttestationSignature(tdxQuote, dcapEndorsements) {
         return false
     }
     
@@ -490,7 +490,7 @@ function VerifyBlockWithDirectAttestation(block, tdxQuote, endorsements, expecte
     workloadIdentity = DeriveWorkloadIdentity(tdxQuote)
     
     // 3. Verify workload identity is authorized
-    if !IsExpectedMeasurement(workloadIdentity, expectedMeasurements) {
+    if !MatchesExpectedMeasurement(workloadIdentity, expectedMeasurements) {
         return false
     }
     
@@ -731,7 +731,7 @@ This verification process ensures that:
 - There's end-to-end verification from block production to inclusion in the L2 chain
 
 This verification process additionally ensures that:
-1. The signature transaction is properly formatted
+1. The [SignatureTransaction](#signaturetransaction) is properly formatted
 2. The signature covers the block without the final transaction
 3. The signature is valid for the attested TEE block builder
 4. The signature is included in the rollup data posted to L1
@@ -895,7 +895,7 @@ contract TEEMeasurementRegistry {
 
 This registry serves as the source of truth for:
 
-1. Expected TEE measurements for both coordinators and block builders
+1. [ExpectedMeasurement](#expectedmeasurement) records for both coordinators and block builders
 2. Verified coordinator attestations and public keys
 3. Block builder authorization status
 
@@ -923,7 +923,7 @@ Expected measurements follow a defined lifecycle:
 
 ## Measurement Updates
 
-Updates to expected measurements are required in several scenarios:
+Updates to [ExpectedMeasurement](#expectedmeasurement) records are required in several scenarios:
 
 1. **Security Patches**: Critical security fixes require immediate updates
 2. **Feature Additions**: New functionality requires code changes
@@ -948,7 +948,7 @@ Several security considerations apply to the TEE block builder verification prot
 
 4. **Build Reproducibility**: Minor differences in build environments can lead to different measurements, creating false negatives in verification
 
-5. **Certificate Revocation**: Certificates have a short validity period (e.g., 7 days) to minimize the impact of key compromise. Additionally, a certificate revocation list (CRL) is maintained by the coordinator.
+5. **Certificate Revocation**: TLS Certificates have a short validity period (7 days) and Block Signing Certificates have a longer validity period (30 days) to minimize the impact of key compromise. Additionally, a certificate revocation list (CRL) is maintained by the coordinator.
 
 6. **Time of Check/Time of Use (TOCTOU)**: Block verification checks that the workload identity was valid at the time the block was produced, preventing attacks where a malicious operator might try to use a revoked measurement.
 
@@ -956,6 +956,6 @@ Several security considerations apply to the TEE block builder verification prot
 
 8. **Key Rotation**: Even though keys are derived deterministically, regular rotation schedules can be implemented by including a time component in the seed derivation.
 
-9. **Endorsement Freshness**: DCAP endorsements have validity periods. Verifiers must ensure they use up-to-date endorsements from Intel's PCS.
+9. **DCAPEndorsements Freshness**: [DCAPEndorsements](#dcapendorsements) have validity periods. Verifiers must ensure they use up-to-date [DCAPEndorsements](#dcapendorsements) from Intel's PCS.
 
 10. **Chain of Trust**: The security of the entire system depends on the integrity of the attestation mechanism, the correctness of expected measurements, and the proper implementation of the verification protocol.
