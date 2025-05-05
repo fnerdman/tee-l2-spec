@@ -290,8 +290,8 @@ This approach ensures that:
 
 The block builder utilizes two separate certificates for different purposes:
 
-1. **TLS Certificate**: Ephemeral certificate used for secure communications
-2. **Block Signing Certificate**: Deterministically derived and used for signing blocks
+1. **[TLS Certificate](#tls-certificate)**: Ephemeral certificate used for secure communications
+2. **[Block Signing Certificate](#block-signing-certificate)**: Deterministically derived and used for signing blocks
 
 Both certificates are generated within the attested TEE and signed by the coordinator, but they serve different purposes and have different properties. This approach enables deterministic key recovery for the signing key and creates a cryptographic binding between the attestation and both certificates. For more details, see the [Dual Certificate Model](#dual-certificate-model) section.
 This is an opinionated approach and isn’t strictly necessary. One could also use the ephemeral TLS key. However using the key for two different communication channels is generally considered bad practice and a potential security issue.
@@ -362,7 +362,7 @@ For block verification, the [SignatureTransaction](#signaturetransaction) is inc
 #### PKI-based Verification
 For the PKI-based approach, verification requires:
 - The block with its [SignatureTransaction](#signaturetransaction)
-- The Block Signing Certificate of the block builder (signed by the coordinator)
+- The [Block Signing Certificate](#block-signing-certificate) of the block builder (signed by the coordinator)
 - The coordinator's CA certificate (for the trust chain)
 
 #### Direct Attestation Verification
@@ -569,8 +569,8 @@ This approach leverages Automata's on-chain DCAP attestation to verify the coord
 
 The block builder utilizes two separate certificates for different purposes:
 
-1. **TLS Certificate**: Ephemeral certificate used for secure communications
-2. **Block Signing Certificate**: Deterministically derived and used for signing blocks
+1. **[TLS Certificate](#tls-certificate)**: Ephemeral certificate used for secure communications
+2. **[Block Signing Certificate](#block-signing-certificate)**: Deterministically derived and used for signing blocks
 
 Both certificates are generated within the attested TEE and signed by the coordinator, but they serve different purposes and have different properties.
 
@@ -948,7 +948,7 @@ Several security considerations apply to the TEE block builder verification prot
 
 4. **Build Reproducibility**: Minor differences in build environments can lead to different measurements, creating false negatives in verification
 
-5. **Certificate Revocation**: TLS Certificates have a short validity period (7 days) and Block Signing Certificates have a longer validity period (30 days) to minimize the impact of key compromise. Additionally, a certificate revocation list (CRL) is maintained by the coordinator.
+5. **Certificate Revocation**: [TLS Certificate](#tls-certificate) has a short validity period (7 days) and [Block Signing Certificate](#block-signing-certificate) has a longer validity period (30 days) to minimize the impact of key compromise. Additionally, a certificate revocation list (CRL) is maintained by the coordinator.
 
 6. **Time of Check/Time of Use (TOCTOU)**: Block verification checks that the workload identity was valid at the time the block was produced, preventing attacks where a malicious operator might try to use a revoked measurement.
 
