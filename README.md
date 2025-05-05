@@ -3,6 +3,17 @@
 ## Table of Contents
 - [Introduction](#introduction)
 - [Design Goals](#design-goals)
+- [Data Structures](#data-structures)
+  - [TDXQuote](#tdxquote)
+  - [TDReport](#tdreport)
+  - [DCAPEndorsements](#dcapendorsements)
+  - [TDXMeasurements](#tdxmeasurements)
+  - [SignatureTransaction](#signaturetransaction)
+  - [ExpectedMeasurement](#expectedmeasurement)
+  - [CoordinatorInfo](#coordinatorinfo)
+  - [X.509 Certificates](#x509-certificates)
+    - [TLS Certificate](#tls-certificate)
+    - [Block Signing Certificate](#block-signing-certificate)
 - [Protocol Components](#protocol-components)
 - [TEE Attestation Mechanism](#tee-attestation-mechanism)
   - [Intel TDX DCAP Attestation](#intel-tdx-dcap-attestation)
@@ -51,6 +62,157 @@ The L2 TEE Block Builder Verification protocol aims to provide:
 3. **Transparency**: Provide visibility into the code running inside the TEE
 4. **No Availability Assumptions**: Prevent any single entity from becoming a verification bottleneck
 
+## Data Structures
+
+The protocol defines several key data structures organized into the following subsections:
+
+### TDXQuote
+
+Contains attestation data including header, TD report, security versions, and user data field:
+
+```
+TDXQuote {
+  Header: QuoteHeader,       // Version and attestation key type info
+  TDReport: TDReport,        // TD measurement registers
+  TEEExtendedProductID: u16, // TEE product identifier
+  TEESecurityVersion: u16,   // Security patch level
+  QESecurityVersion: u16,    // Quoting Enclave security version
+  QEVendorID: [16]byte,      // Intel Quoting Enclave vendor ID
+  UserData: [64]byte,        // User-defined report data (public key hash)
+  Signature: byte[],         // ECDSA signature over the Quote
+}
+```
+
+### TDReport
+
+Contains measurement registers for the Trusted Domain (TD):
+
+```
+TDReport {
+  MRTD: [48]byte,           // Measurement register for TD (initial code/data)
+  RTMR: [4][48]byte,        // Runtime measurement registers
+  MROWNER: [48]byte,        // Measurement register for owner (policy)
+  MRCONFIGID: [48]byte,     // Configuration ID
+  MROWNER_CONFIG: [48]byte, // Owner-defined configuration
+  ReportData: [64]byte      // User-defined data (public key hash)
+}
+```
+
+### DCAPEndorsements
+
+Provides endorsements for validating TDX Quote:
+
+```
+DCAPEndorsements {
+  QEIdentity: byte[],         // Quoting Enclave Identity
+  TCBInfo: byte[],            // Trusted Computing Base info
+  QECertificationData: byte[] // Certification data for the attestation key
+}
+```
+
+### TDXMeasurements
+
+Contains various measurement registers for workload identity:
+
+```
+struct TDXMeasurements {
+  bytes MRTD;             // Initial TD measurement (boot loader, initial data)
+  bytes[4] RTMR;          // Runtime measurements (extended at runtime)
+  bytes MROWNER;          // Contains operator's public key (Ethereum address or other identifier)
+  bytes MRCONFIGID;       // Hash of service configuration stored onchain and fetched on boot
+  bytes MROWNERCONFIG;    // Contains unique instance ID chosen by the operator
+}
+```
+
+### SignatureTransaction
+
+Special transaction format for including TEE signatures in blocks:
+
+```
+SignatureTransaction {
+  // Standard transaction fields with special values
+  to: TEE_SIGNATURE_CONTRACT_ADDRESS,
+  from: TEE_BUILDER_ADDRESS,
+  value: 0,
+  
+  // The signature data is included in the transaction input
+  data: abi.encode(
+      signature
+  )
+}
+```
+
+### ExpectedMeasurement
+
+Defines trusted workload with identity hash, validity period, and code info:
+
+```
+struct ExpectedMeasurement {
+  bytes32 workloadIdentity;   // The derived workload identity hash
+  uint64 startBlock;          // L2 block height from which this measurement is valid
+  uint64 endBlock;            // L2 block height until which this measurement is valid
+  bytes32 codeCommitHash;     // Git commit hash of source code
+  bytes32 buildInfoHash;      // Hash of build information and dependencies
+  string metadataURI;         // URI to additional metadata (build instructions, etc.)
+}
+```
+
+### CoordinatorInfo
+
+Stores coordinator data including workload identity and public key:
+
+```
+struct CoordinatorInfo {
+  bytes32 workloadIdentity;
+  bytes publicKey;
+  uint64 registrationTime;
+  uint64 expirationTime;
+  bool active;
+}
+```
+
+### X.509 Certificates
+
+Used in dual certificate model for TLS and block signing:
+
+#### TLS Certificate
+
+```
+X.509 Certificate {
+  Version: 3
+  Subject: CN=BlockBuilderNode-TLS, O=L2TEEBuilder
+  Issuer: CN=TEECoordinator, O=L2TEECoordinator
+  Validity: <Issue time> to <Issue time + 7 days>
+  Subject Public Key Info: <Builder's ephemeral TLS public key>
+  Extensions:
+      SubjectAltName: DNS:builder.example.com, IP:192.0.2.1
+      ...
+      X509v3 Extended Key Usage: TLS Web Server Authentication, TLS Web Client Authentication
+      
+      # TDX attestation data included as certificate extension
+      Custom Extension OID 1.3.6.1.4.1.12345.1.1: <TDX Quote>
+  Signature: <Coordinator's signature>
+}
+```
+
+#### Block Signing Certificate
+
+```
+X.509 Certificate {
+  Version: 3
+  Subject: CN=BlockBuilderNode-Signer, O=L2TEEBuilder
+  Issuer: CN=TEECoordinator, O=L2TEECoordinator
+  Validity: <Issue time> to <Issue time + 30 days>
+  Subject Public Key Info: <Builder's deterministic signing public key>
+  Extensions:
+      ...
+      
+      # TDX attestation data included as certificate extension
+      Custom Extension OID 1.3.6.1.4.1.12345.1.1: <TDX Quote>
+  Signature: <Coordinator's signature>
+}
+```
+
 ## Protocol Components
 
 The protocol consists of three key components:
@@ -65,29 +227,7 @@ Attestation is the process by which a TEE proves its identity and integrity. The
 
 ### Intel TDX DCAP Attestation
 
-TDX attestation produces a Quote structure that contains:
-
-```
-TDXQuote {
-  Header: QuoteHeader,       // Version and attestation key type info
-  TDReport: TDReport,        // TD measurement registers
-  TEEExtendedProductID: u16, // TEE product identifier
-  TEESecurityVersion: u16,   // Security patch level
-  QESecurityVersion: u16,    // Quoting Enclave security version
-  QEVendorID: [16]byte,      // Intel Quoting Enclave vendor ID
-  UserData: [64]byte,        // User-defined report data (public key hash)
-  Signature: byte[],         // ECDSA signature over the Quote
-}
-
-TDReport {
-  MRTD: [48]byte,           // Measurement register for TD (initial code/data)
-  RTMR: [4][48]byte,        // Runtime measurement registers
-  MROWNER: [48]byte,        // Measurement register for owner (policy)
-  MRCONFIGID: [48]byte,     // Configuration ID
-  MROWNER_CONFIG: [48]byte, // Owner-defined configuration
-  ReportData: [64]byte      // User-defined data (public key hash)
-}
-```
+TDX attestation produces a Quote structure as defined in the [TDXQuote](#tdxquote) and [TDReport](#tdreport) sections.
 
 The attestation process follows these steps:
 
@@ -97,15 +237,7 @@ The attestation process follows these steps:
 
 ### Attestation Endorsements
 
-To validate a TDX Quote, a verifier needs these simplified endorsements:
-
-```
-DCAPEndorsements {
-  QEIdentity: byte[],       // Quoting Enclave Identity
-  TCBInfo: byte[],          // Trusted Computing Base info
-  QECertificationData: byte[] // Certification data for the attestation key
-}
-```
+To validate a TDX Quote, a verifier needs the (simplified) [DCAPEndorsements](#dcapendorsements) structure.
 
 These endorsements provide the trust anchor for the Intel attestation infrastructure.
 
@@ -113,17 +245,7 @@ These endorsements provide the trust anchor for the Intel attestation infrastruc
 
 ### Workload Identity Derivation
 
-A TEE's workload identity is derived from a combination of its measurement registers. The TDX platform provides several registers that capture different aspects of the workload:
-
-```
-struct TDXMeasurements {
-    bytes MRTD;             // Initial TD measurement (boot loader, initial data)
-    bytes[4] RTMR;          // Runtime measurements (extended at runtime)
-    bytes MROWNER;          // Contains operator's public key (Ethereum address or other identifier)
-    bytes MRCONFIGID;       // Hash of service configuration stored onchain and fetched on boot
-    bytes MROWNERCONFIG;    // Contains unique instance ID chosen by the operator
-}
-```
+A TEE's workload identity is derived from a combination of its measurement registers. The TDX platform provides several registers that capture different aspects of the workload through the [TDXMeasurements](#tdxmeasurements) structure.
 
 The workload identity computation takes these registers into account:
 
@@ -223,21 +345,7 @@ When building a block, the TEE block builder:
 
 ### Signature Inclusion within Block
 
-To include the TEE signature within the block itself (making it verifiable on L1), the signature is added as a special final transaction in the block:
-
-```
-SignatureTransaction {
-    // Standard transaction fields with special values
-    to: TEE_SIGNATURE_CONTRACT_ADDRESS,
-    from: TEE_BUILDER_ADDRESS,
-    value: 0,
-    
-    // The signature data is included in the transaction input
-    data: abi.encode(
-        signature
-    )
-}
-```
+To include the TEE signature within the block itself (making it verifiable on L1), the signature is added as a special final transaction in the block using the [SignatureTransaction](#signaturetransaction) format.
 
 This approach has several advantages:
 1. It works with standard L2 block structures without protocol changes
@@ -309,7 +417,9 @@ flowchart TD
 
 #### PKI-based Verification
 
-In the PKI model, verifiers use the coordinator's CA certificate to establish a chain of trust:
+In the PKI model, verifiers use the coordinator's CA certificate to establish a chain of trust.
+
+The verification function below uses the [TDXQuote](#tdxquote) and [TDReport](#tdreport) structures:
 
 ```
 function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, endorsements) {
@@ -365,7 +475,9 @@ function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, endors
 
 #### Direct Attestation Verification
 
-For higher security use cases, verifiers can directly verify against attestations without relying on the coordinator's certificate:
+For higher security use cases, verifiers can directly verify against attestations without relying on the coordinator's certificate.
+
+This verification approach also uses the [TDXQuote](#tdxquote) structure:
 
 ```
 function VerifyBlockWithDirectAttestation(block, tdxQuote, endorsements, expectedMeasurements, signingPublicKey) {
@@ -540,45 +652,11 @@ Note that the coordinator does not need to separately verify if the workload ide
 
 ### Attested TLS Certificate
 
-The ephemeral TLS certificate is used solely for secure communications:
-
-```
-X.509 Certificate {
-    Version: 3
-    Subject: CN=BlockBuilderNode-TLS, O=L2TEEBuilder
-    Issuer: CN=TEECoordinator, O=L2TEECoordinator
-    Validity: <Issue time> to <Issue time + 7 days>
-    Subject Public Key Info: <Builder's ephemeral TLS public key>
-    Extensions:
-        SubjectAltName: DNS:builder.example.com, IP:192.0.2.1
-        ...
-        X509v3 Extended Key Usage: TLS Web Server Authentication, TLS Web Client Authentication
-        
-        # TDX attestation data included as certificate extension
-        Custom Extension OID 1.3.6.1.4.1.12345.1.1: <TDX Quote>
-    Signature: <Coordinator's signature>
-}
-```
+The ephemeral TLS certificate, as defined in the [TLS Certificate](#tls-certificate) section, is used solely for secure communications. It has a relatively short validity period of 7 days and includes extended key usage extensions for TLS authentication.
 
 ### Block Signing Certificate
 
-The deterministically derived block signing certificate is used for signing blocks:
-
-```
-X.509 Certificate {
-    Version: 3
-    Subject: CN=BlockBuilderNode-Signer, O=L2TEEBuilder
-    Issuer: CN=TEECoordinator, O=L2TEECoordinator
-    Validity: <Issue time> to <Issue time + 30 days>
-    Subject Public Key Info: <Builder's deterministic signing public key>
-    Extensions:
-        ...
-        
-        # TDX attestation data included as certificate extension
-        Custom Extension OID 1.3.6.1.4.1.12345.1.1: <TDX Quote>
-    Signature: <Coordinator's signature>
-}
-```
+The deterministically derived block signing certificate, as defined in the [Block Signing Certificate](#block-signing-certificate) section, is used for signing blocks. It has a longer validity period of 30 days and contains the builder's deterministic signing public key.
 
 When a client connects to a block builder service:
 1. The TLS handshake occurs using the ephemeral TLS certificate
@@ -756,18 +834,7 @@ This separation of concerns provides clear boundaries between communication secu
 
 ### Expected Measurement Definition
 
-TEE measurements are hardware-enforced hashes of the code and initial data loaded into the TEE. For Intel TDX:
-
-```
-struct ExpectedMeasurement {
-    bytes32 workloadIdentity;     // The derived workload identity hash
-    uint64 startBlock;            // L2 block height from which this measurement is valid
-    uint64 endBlock;              // L2 block height until which this measurement is valid
-    bytes32 codeCommitHash;       // Git commit hash of source code
-    bytes32 buildInfoHash;        // Hash of build information and dependencies
-    string metadataURI;           // URI to additional metadata (build instructions, etc.)
-}
-```
+TEE measurements are hardware-enforced hashes of the code and initial data loaded into the TEE. For Intel TDX, the [ExpectedMeasurement](#expectedmeasurement) structure is used to track valid code configurations.
 
 These measurements are collected by the hardware during TEE initialization and cannot be forged by software.
 
@@ -777,7 +844,9 @@ This permissioned model ensures that only authorized operators can run authorize
 
 ### On-Chain Verification System
 
-To securely track and verify expected measurements, the protocol leverages an on-chain verification system:
+To securely track and verify expected measurements, the protocol leverages an on-chain verification system.
+
+The contract below references the [ExpectedMeasurement](#expectedmeasurement) and [CoordinatorInfo](#coordinatorinfo) structures defined earlier:
 
 ```solidity
 contract TEEMeasurementRegistry {
@@ -790,22 +859,9 @@ contract TEEMeasurementRegistry {
     // Automata DCAP Attestation contract reference
     IDCAPAttestation public dcapAttestationContract;
     
-    struct ExpectedMeasurement {
-        bytes32 workloadIdentity;     // The derived workload identity hash
-        uint64 startBlock;            // L2 block height from which this measurement is valid
-        uint64 endBlock;              // L2 block height until which this measurement is valid
-        bytes32 codeCommitHash;       // Git commit hash of source code
-        bytes32 buildInfoHash;        // Hash of build information and dependencies
-        string metadataURI;           // URI to additional metadata (build instructions, etc.)
-    }
-    
-    struct CoordinatorInfo {
-        bytes32 workloadIdentity;
-        bytes publicKey;
-        uint64 registrationTime;
-        uint64 expirationTime;
-        bool active;
-    }
+    // Struct definitions referenced from the Data Structures section
+    struct ExpectedMeasurement;
+    struct CoordinatorInfo;
     
     // Register a coordinator after verifying its DCAP quote on-chain
     function registerCoordinator(bytes calldata rawQuote) external onlyGovernance {
