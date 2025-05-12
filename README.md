@@ -17,7 +17,7 @@
 - [Protocol Components](#protocol-components)
 - [TEE Attestation Mechanism](#tee-attestation-mechanism)
   - [Intel TDX DCAP Attestation](#intel-tdx-dcap-attestation)
-  - [Attestation Endorsements](#attestation-endorsements)
+  - [DCAP Attestation Endorsements](#dcap-attestation-endorsements)
 - [Workload Identity and Key Management](#workload-identity-and-key-management)
   - [Workload Identity Derivation](#workload-identity-derivation)
   - [Extended Identity with Operator](#extended-identity-with-operator)
@@ -235,9 +235,9 @@ The attestation process follows these steps:
 2. The Quote Enclave (QE) creates a Quote by signing the TD Report with an Attestation Key
 3. The Quote can be verified against Intel's Provisioning Certification Service (PCS)
 
-### Attestation Endorsements
+### DCAP Attestation Endorsements
 
-To validate a TDX Quote, a verifier needs the (simplified) [DCAPEndorsements](#dcapendorsements) structure.
+To validate a TDX Quote, a verifier needs the (simplified) [DCAP Endorsements](#dcapendorsements) structure.
 
 These endorsements provide the trust anchor for the Intel attestation infrastructure.
 
@@ -451,7 +451,7 @@ function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, dcapEn
     // 8. Verify the TDX attestation from certificate extension
     tdxQuote = signingCertificate.Extensions["TDXQuote"]
     
-    // 8a. Verify the DCAP attestation signature with Intel DCAP endorsements
+    // 8a. Verify the DCAP attestation signature with Intel DCAP Endorsements
     if !VerifyAttestationSignature(tdxQuote, dcapEndorsements) {
         return false
     }
@@ -481,7 +481,7 @@ This verification approach also uses the [TDXQuote](#tdxquote) structure:
 
 ```
 function VerifyBlockWithDirectAttestation(block, tdxQuote, dcapEndorsements, expectedMeasurements, signingPublicKey) {
-    // 1. Verify the DCAP attestation signature with Intel endorsements
+    // 1. Verify the DCAP attestation signature with Intel DCAP Endorsements
     if !VerifyAttestationSignature(tdxQuote, dcapEndorsements) {
         return false
     }
@@ -523,7 +523,7 @@ function VerifyBlockWithDirectAttestation(block, tdxQuote, dcapEndorsements, exp
 ```
 
 ## Certificate Authority Model
-
+?
 In the PKI model, a coordinator running in its own TEE acts as a Certificate Authority (CA):
 
 1. The coordinator generates a CA key pair within its TEE
@@ -565,6 +565,9 @@ This approach leverages Automata's on-chain DCAP attestation to verify the coord
 3. The coordinator is running authorized code
 4. The coordinator's public key is authenticated
 
+
+*TODO(fnerdman):* the coordinator will likely want to register it's CA cert, rather than just it's public key?
+
 ### Dual Certificate Model
 
 The block builder utilizes two separate certificates for different purposes:
@@ -586,7 +589,7 @@ When a block builder node starts:
    - It includes a hash of the TLS public key in the attestation quote's UserData field
    - It sends the attestation quote and TLS public key to the coordinator
    - The coordinator verifies:
-     - The attestation signature is valid using Intel's endorsements
+     - The attestation signature is valid using Intel's [DCAP Endorsements](#dcapendorsements)
      - The attestation's measurements match an authorized workload identity
      - The TLS public key hash matches the hash in the quote's UserData
    - If verification succeeds, the coordinator issues a TLS certificate for the ephemeral key
@@ -620,7 +623,7 @@ sequenceDiagram
     BB->>BB: Create CSR including public key<br/>and attestation quote
     BB->>TC: Send CSR
     
-    TC->>IAS: Verify quote with Intel endorsements
+    TC->>IAS: Verify quote with Intel's DCAP endorsements
     IAS->>TC: Attestation verification result
     
     TC->>TC: Verify workload identity<br/>matches authorized measurements
@@ -642,7 +645,7 @@ sequenceDiagram
     BB->>BB: Create CSR including signing public key<br/>and attestation quote
     BB->>TC: Send CSR for block signing certificate
     
-    TC->>IAS: Verify quote with Intel endorsements
+    TC->>IAS: Verify quote with Intel's DCAP endorsements
     IAS->>TC: Attestation verification result
     TC->>TC: Verify CSR and public key<br/>match expectations
     TC->>BB: Sign and return block signing certificate
@@ -956,6 +959,6 @@ Several security considerations apply to the TEE block builder verification prot
 
 8. **Key Rotation**: Even though keys are derived deterministically, regular rotation schedules can be implemented by including a time component in the seed derivation.
 
-9. **DCAPEndorsements Freshness**: [DCAPEndorsements](#dcapendorsements) have validity periods. Verifiers must ensure they use up-to-date [DCAPEndorsements](#dcapendorsements) from Intel's PCS.
+9. **DCAP Endorsements Freshness**: [DCAP Endorsements](#dcapendorsements) have validity periods. Verifiers must ensure they use up-to-date endorsements from Intel's PCS.
 
 10. **Chain of Trust**: The security of the entire system depends on the integrity of the attestation mechanism, the correctness of expected measurements, and the proper implementation of the verification protocol.
