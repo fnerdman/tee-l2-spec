@@ -29,6 +29,7 @@
   - [Attestation and Registration](#attestation-and-registration)
   - [Runtime Authorization](#runtime-authorization)
   - [Maintenance: Handling Changing Endorsements](#maintenance-handling-changing-endorsements)
+- [Offchain TEE Address Verification](#offchain-tee-address-verification)
 - [Transparency Log](#transparency-log)
   - [Purpose and Benefits](#purpose-and-benefits)
   - [Logged Information](#logged-information)
@@ -396,12 +397,13 @@ This simply checks if the address is currently associated with the specified wor
 When an attestation successfully passes verification:
 
 ```
-function addAddress(workloadId, tcbHash, address)
+function addAddress(workloadId, tcbHash, address, quote)
 ```
 
 This operation:
 1. Records that this address has been validated for this workload
 2. Associates it with the specific endorsement bundle (`tcbHash`) that validated it
+3. Stores the raw attestation quote for future reference and verification
 3. If the address was previously registered for this workloadId with a different tcbHash, the old entry is replaced
 
 #### 3. Endorsement Management
@@ -417,13 +419,23 @@ This operation handles the case where a specific endorsement bundle is no longer
 2. This ensures only addresses with current, valid endorsements remain in the allowlist
 3. We're passing in the endorsement for verifcation purposes, i.e. map the endorsement to the tcbHash, check if the endorsement has been marked insecure, and only then proceed.
 
+#### 4. Quote Retrieval
+
+To retrieve the stored attestation quote for a specific address:
+
+```
+function getQuoteForAddress(address) → bytes
+```
+
+This operation returns the raw attestation quote that was used to register the address, enabling offline verification or additional analysis of the attestation data.
+
 ### Key Requirements
 
 1. **Single Current Endorsement**: An address has exactly one current endorsement bundle for each workloadId it's registered under.
-
 2. **Complete Revocation**: When an endorsement bundle becomes invalid, all addresses registered with that specific (workloadId, tcbHash) combination are removed completely - there is no partial revocation.
+3. **Quote Storage**: The system maintains a copy of the most recent attestation quote used to register each address, supporting external verification and auditability.
 
-3. **Gas Efficiency**: The lookup operation must be extremely efficient (O(1)) regardless of the number of addresses stored.
+4. **Gas Efficiency**: The lookup operation must be extremely efficient (O(1)) regardless of the number of addresses stored.
 
 ## Policy Layer: Flexible Authorization
 
@@ -522,6 +534,23 @@ Intel endorsements change over time, requiring a maintenance process:
 
 This maintenance process ensures that at any point in time, the allowlist only contains addresses that would pass attestation against currently valid Intel endorsements.
 
+## Offchain TEE Address Verification
+
+The Flashtestations protocol enables comprehensive offchain verification of TEE service addresses through its quote storage mechanism. Applications can retrieve the original attestation quote for any registered address via the getQuoteForAddress(address) function, allowing for complete independent verification without incurring gas costs. This approach permits offchain entities to perform the same cryptographic validation as the original onchain verifier, including measurement verification and endorsement checks against the Intel PCS.
+
+### Example Verification Flow
+
+```javascript
+// JavaScript example for offchain quote verification
+async function verifyTEEAddressOffchain(serviceAddress) {
+  const allowlist = new ethers.Contract(ALLOWLIST_ADDRESS, ALLOWLIST_ABI, provider);
+  // Retrieve the stored attestation quote
+  const quote = await allowlist.getQuoteForAddress(serviceAddress);
+  // Verify the quote against Intel endorsements using local DCAP verification
+  return verifyDCAPQuoteLocally(quote, serviceAddress);
+}
+```
+
 ## Transparency Log
 
 The L2 blockchain functions as a transparency log within Flashtestations, maintaining a permanent record of attestation events and their verification. This log provides auditability, verifiability, and transparency for the entire TEE attestation ecosystem.
@@ -569,6 +598,11 @@ event AllowlistUpdated(
     address indexed ethAddress,
     bool isAdded
 );
+
+event QuoteStored(
+    address indexed ethAddress,
+    bytes quote
+);
 ```
 
 When an attestation is verified, the raw quote data is included in the transaction calldata, making it permanently available onchain. The verification results and extracted data are then emitted as events for efficient indexing and querying.
@@ -610,6 +644,8 @@ The design maintains clear separation between:
 4. **Consumer Contracts**: Use policy checks to authorize operations
 
 This separation enables each component to evolve independently, with governance focused on the appropriate level of abstraction.
+
+The Allowlist Registry also provides direct access to stored attestation quotes, allowing external systems to perform their own verification or analysis without requiring additional onchain transactions.
 
 ## Reproducible Builds
 
