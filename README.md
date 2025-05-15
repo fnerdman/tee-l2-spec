@@ -1,225 +1,231 @@
-# L2 TEE Block Builder Verification Protocol
-
-## Table of Contents
-- [Introduction](#introduction)
-- [Design Goals](#design-goals)
-- [Data Structures](#data-structures)
-  - [TDXQuote](#tdxquote)
-  - [TDReport](#tdreport)
-  - [DCAPEndorsements](#dcapendorsements)
-  - [TDXMeasurements](#tdxmeasurements)
-  - [SignatureTransaction](#signaturetransaction)
-  - [ExpectedMeasurement](#expectedmeasurement)
-  - [CoordinatorInfo](#coordinatorinfo)
-  - [X.509 Certificates](#x509-certificates)
-    - [TLS Certificate](#tls-certificate)
-    - [Block Signing Certificate](#block-signing-certificate)
-- [Protocol Components](#protocol-components)
-- [TEE Attestation Mechanism](#tee-attestation-mechanism)
-  - [Intel TDX DCAP Attestation](#intel-tdx-dcap-attestation)
-  - [DCAP Attestation Endorsements](#dcap-attestation-endorsements)
-- [Workload Identity and Key Management](#workload-identity-and-key-management)
-  - [Workload Identity Derivation](#workload-identity-derivation)
-  - [Extended Identity with Operator](#extended-identity-with-operator)
-  - [Dual Certificate Model and Key Derivation](#dual-certificate-model-and-key-derivation)
-- [Block Signatures and Verification](#block-signatures-and-verification)
-  - [Block Signing Process](#block-signing-process)
-  - [Signature Inclusion within Block](#signature-inclusion-within-block)
-  - [Block Verification Material](#block-verification-material)
-  - [Block Verification](#block-verification)
-- [Certificate Authority Model](#certificate-authority-model)
-  - [On-Chain DCAP Attestation for Coordinator](#on-chain-dcap-attestation-for-coordinator)
-  - [Dual Certificate Model](#dual-certificate-model)
-  - [Certificate Issuance Process](#certificate-issuance-process)
-  - [Attested TLS Certificate](#attested-tls-certificate)
-  - [Block Signing Certificate](#block-signing-certificate)
-- [Rollup Boost Integration](#rollup-boost-integration)
-- [Service Connectivity and TLS Authentication](#service-connectivity-and-tls-authentication)
-  - [Service Discovery](#service-discovery)
-  - [TLS Connection Verification](#tls-connection-verification)
-  - [Block Signing Certificate Retrieval](#block-signing-certificate-retrieval)
-  - [TEE/Service Identity Verification](#teeservice-identity-verification)
-- [Expected Measurements and On-Chain Verification](#expected-measurements-and-on-chain-verification)
-  - [Expected Measurement Definition](#expected-measurement-definition)
-  - [On-Chain Verification System](#on-chain-verification-system)
-- [Reproducible Builds](#reproducible-builds)
-- [Measurement Lifecycle](#measurement-lifecycle)
-- [Measurement Updates](#measurement-updates)
-- [Verification Models](#verification-models)
-- [Verification Tool](#verification-tool)
-- [Security Considerations](#security-considerations)
+# Flashtestations: Transparent On-Chain TEE Verification and Curated Allowlist Protocol
 
 ## Introduction
 
-This specification describes the attestation and verification protocol for TEE-based L2 block builders. The protocol enables verifiable and transparent guarantees of block production within TEEs, allowing any party to verify that blocks were produced according to the expected rules without trusting the operator.
+Trusted Execution Environments (TEEs) offer a promising approach for running confidential workloads with hardware-enforced security guarantees. However, integrating TEEs with blockchain applications presents significant challenges: How can smart contracts verify that they're interacting with authentic TEE services running expected code? How can this verification scale efficiently on-chain? How can we maintain an up-to-date registry of validated services as hardware security requirements evolve?
+
+Flashtestations addresses these challenges by providing a comprehensive on-chain protocol for TEE verification, address registration, and transparent record-keeping. The protocol enables:
+
+1. On-chain verification of Intel TDX attestations against current Intel endorsements
+2. Maintenance of a curated allowlist of validated Ethereum addresses associated with specific TEE workloads
+3. Policy-based authorization for smart contracts to securely interact with TEE services
+4. Transparent logging of all attestation events and endorsement changes
 
 ## Design Goals
 
-The L2 TEE Block Builder Verification protocol aims to provide:
+Flashtestations is designed to achieve the following objectives:
 
-1. **Integrity**: Guarantee that blocks are built according to the expected rules
-2. **Verifiability**: Allow any party to verify block provenance without trusting the operator
-3. **Transparency**: Provide visibility into the code running inside the TEE
-4. **No Availability Assumptions**: Prevent any single entity from becoming a verification bottleneck
+1. **Security**: Provide cryptographic proof that a service is running inside a genuine TEE with expected code, with verification resistant to spoofing or replay attacks.
+
+2. **Efficiency**: Ensure key operations (especially allowlist lookups) are gas-efficient enough for regular use in smart contracts, with O(1) complexity regardless of allowlist size.
+
+3. **Maintainability**: Support efficient updates as Intel endorsements evolve, without requiring re-verification of all attestations.
+
+4. **Flexibility**: Enable policy-based access control that can adapt to different trust requirements without modifying consumer contracts.
+
+5. **Transparency**: Maintain auditable records of all attestations and endorsement changes to support accountability and security analysis.
+
+6. **Separation of Concerns**: Clearly separate allowlist mechanics from policy governance, enabling independent evolution of these components.
+
+## System Architecture
+
+The Flashtestations protocol consists of four key components that work together to provide secure on-chain TEE verification:
+
+```
+┌─────────────────────┐                  ┌─────────────────────┐
+│ TDX VM              │                  │ On-Chain Verifier   │
+│                     │  Attestation     │                     │
+│ ┌─────────────────┐ │  Quote          │ ┌─────────────────┐ │
+│ │ TEE Workload    │ │ ───────────────►│ │ DCAP Attestation│ │
+│ │                 │ │                  │ │ Verifier        │ │
+│ │ (workloadId)    │ │                  │ │                 │ │
+│ └─────────────────┘ │                  │ └────────┬────────┘ │
+│                     │                  │          │          │
+└─────────────────────┘                  │          ▼          │
+                                         │ ┌─────────────────┐ │
+┌─────────────────────┐                  │ │ Intel           │ │
+│ Consumer Contract   │                  │ │ Endorsements    │ │
+│                     │                  │ │ (tcbHash)       │ │
+│ ┌─────────────────┐ │                  │ └────────┬────────┘ │
+│ │ Operation       │ │                  │          │          │
+│ │ Authorization   │ │                  │          ▼          │
+│ └─────────────────┘ │                  │ ┌─────────────────┐ │
+│         │           │                  │ │ Registration    │ │
+└─────────┼───────────┘                  │ │ Logic           │ │
+          │                              │ └────────┬────────┘ │
+          │                              └──────────┼──────────┘
+          │                                         │
+┌─────────▼───────────┐                             ▼
+│ Policy Registry     │                  ┌───────────────────────┐
+│                     │  isAllowed       │ Allowlist Registry    │
+│ ┌─────────────────┐ │  Query           │                       │
+│ │ workloadId[]    │ │ ◄───────────────►│ (workloadId,address)  │
+│ │ per policyId    │ │                  │ mappings              │
+│ └─────────────────┘ │                  │                       │
+│                     │                  └───────────────────────┘
+└─────────────────────┘
+```
+
+1. **On-Chain Verifier**: Validates TDX attestation quotes against current Intel endorsements
+2. **Allowlist Registry**: Tracks which addresses have valid attestations for specific workloads
+3. **Policy Registry**: Defines which workloads are acceptable for specific on-chain interactions
+4. **Transparency Log**: Records all attestations and endorsement changes (implemented via events)
+
+## Terminology
+
+The terms in this section are used consistently throughout the specification documents. When a term is first mentioned elsewhere, it links back here.
+
+### Intel TDX Primitives
+
+**Trusted Execution Environment (TEE)**: Hardware-based isolated execution environment that protects code and data from the host operating system and other applications. In Intel TDX, the isolation boundary is the "Trust Domain" (TD) rather than the bare CPU.
+
+**Intel TDX (Trust Domain Extensions)**: Intel's TEE technology for virtual machines that provides hardware-enforced isolation, integrity verification, and attestation capabilities. TDX creates isolated Trust Domains (TDs) inside virtual machines.
+
+**Attestation**: The cryptographic process by which a TEE proves its identity and integrity to a verifier. Produces a signed structure (Quote) containing measurements and claims about the TEE's state.
+
+**DCAP (Data Center Attestation Primitives)**: Intel's attestation system designed for data centers that enables verification without requiring direct communication with Intel for each attestation check.
+
+**Quote**: The cryptographically signed data structure produced during attestation, containing measurement registers and report data fields that uniquely identify the TEE and its contents. Flashtestations supports the DCAP v5 Quote format.
+
+**Intel DCAP collateral**: Data provided by Intel that serves as the trust anchor for attestation verification. This includes QE Identity information, TCB Info, certificates, and related data. Also referred to as "Endorsements" in some contexts.
+
+**Endorsements**: See Intel DCAP collateral.
+
+**TCB (Trusted Computing Base)**: The set of hardware, firmware, and software components critical to a system's security. In TDX, the TCB includes Intel CPU hardware, microcode, and firmware components that must be at approved security levels.
+
+**Measurement Registers**: Hardware-enforced registers within the TEE (MRTD, RTMRs, MROWNER, etc.) that capture cryptographic hashes of code, data, and configuration loaded into the environment. These registers form the basis for workload identity.
+
+**REPORTDATA**: A 64-byte field in the attestation quote containing user-defined data. In Flashtestations, this contains a the public part of an Ethereum address key pair that the TEE workload controls.
+
+**Quote Enclave (QE)**: Intel-provided enclave responsible for signing attestation quotes using Intel-provisioned keys. The QE creates the cryptographic binding between measurement registers and the attestation signature.
+
+**Provisioning Certification Service (PCS)**: Intel's service that provides the certificates and related data needed to verify attestation quotes. In Flashtestations, we use Automata's on-chain PCCS, which stores this data on the blockchain.
+
+**Attestation Key (AK)**: The cryptographic key used by the Quote Enclave to sign attestation quotes. The validity of this key is established through a certificate chain back to Intel.
+
+### Flashtestations Protocol Components
+
+**`workloadId`**: A 32-byte hash uniquely identifying a specific TEE workload based on its measurement registers. Derived as keccak256(MRTD || RTMR[0..3] || MROWNER || MROWNERCONFIG || MRCONFIGID).
+
+**`tcbHash`**: A 32-byte hash representing a specific Intel DCAP collateral bundle at a point in time. This is a Flashtestations-calculated keccak256 hash of the collateral components obtained from Automata's on-chain PCCS, not a value provided directly by Intel.
+
+**Allowlist Registry**: The on-chain data structure that tracks which Ethereum addresses have been validated for specific workloads based on successful attestation. Implemented as the TdxAllowlist contract.
+
+**Policy Registry**: A mapping system that groups related workload identities under a single policy identifier, enabling flexible authorization rules without modifying consumer contracts.
+
+**Transparency Log**: The on-chain event-based system that records all attestation verifications, allowlist changes, and endorsement updates for auditability. Implemented through emitted blockchain events rather than as a separate logging service.
+
+**On-chain Verifier**: The smart contract component (using Automata's DCAP attestation system) that validates TDX attestation quotes against current Intel DCAP collateral and interacts with the Allowlist Registry to register validated addresses.
+
+**Workload**: The specific software running inside a TEE. Its identity is derived from measurement registers that contain cryptographic hashes of loaded code and configuration.
+
+**`policyId`**: An identifier that maps to a list of approved `workloadId`s, enabling contracts to reference policies rather than specific workloads.
+
+**PCCS (Provisioning Certificate Caching Service)**: Automata's on-chain implementation of Intel's PCCS that stores Intel DCAP collateral on the blockchain, making it available for attestation verification. This ensures all verification is reproducible on L2.
+
+### Operational Terms
+
+**Registration**: The process of adding an Ethereum address to the allowlist after successful attestation verification.
+
+**Endorsement Revocation**: The process of marking a specific `tcbHash` as insecure and removing corresponding addresses from the allowlist when Intel updates its security requirements.
+
+**Housekeeping**: The maintenance process of removing addresses from the allowlist when their validating endorsements become stale or insecure. Activated when governance calls `removeEndorsement(workloadId, tcbHash)`.
+
+**TCB Recovery**: The process that occurs when Intel releases updates to address security vulnerabilities in the TCB components. This typically requires updating the list of secure endorsements.
+
+**Reproducible Build**: A deterministic build process that ensures anyone building the same source code will produce identical binary outputs, enabling verification of expected TEE measurements.
 
 ## Data Structures
 
-The protocol defines several key data structures organized into the following subsections:
+The protocol defines several key data structures:
 
-### TDXQuote
+### `TDXQuote`
 
-Contains attestation data including header, TD report, security versions, and user data field:
+The output of the Intel TDX attestation process.
 
-```
-TDXQuote {
-  Header: QuoteHeader,       // Version and attestation key type info
-  TDReport: TDReport,        // TD measurement registers
-  TEEExtendedProductID: u16, // TEE product identifier
-  TEESecurityVersion: u16,   // Security patch level
-  QESecurityVersion: u16,    // Quoting Enclave security version
-  QEVendorID: [16]byte,      // Intel Quoting Enclave vendor ID
-  UserData: [64]byte,        // User-defined report data (public key hash)
-  Signature: byte[],         // ECDSA signature over the Quote
-}
-```
-
-### TDReport
-
-Contains measurement registers for the Trusted Domain (TD):
-
-```
-TDReport {
-  MRTD: [48]byte,           // Measurement register for TD (initial code/data)
-  RTMR: [4][48]byte,        // Runtime measurement registers
-  MROWNER: [48]byte,        // Measurement register for owner (policy)
-  MRCONFIGID: [48]byte,     // Configuration ID
-  MROWNER_CONFIG: [48]byte, // Owner-defined configuration
-  ReportData: [64]byte      // User-defined data (public key hash)
-}
+```python
+class TDXQuote():
+    Header: QuoteHeader
+    TDReport: TDReport
+    TEEExtendedProductID: uint16
+    TEESecurityVersion: uint16
+    QESecurityVersion: uint16
+    QEVendorID: Bytes16
+    UserData: Bytes64
+    Signature: Bytes
 ```
 
-### DCAPEndorsements
+**Field descriptions:**
 
-Provides endorsements for validating TDX Quote:
+- `Header`: Version and attestation key type information.
+- `TDReport`: TD measurement registers.
+- `TEEExtendedProductID`: TEE product identifier.
+- `TEESecurityVersion`: Security patch level of the TEE.
+- `QESecurityVersion`: Security version of the Quoting Enclave.
+- `QEVendorID`: Vendor ID of the Quoting Enclave (Intel).
+- `UserData`: User-defined data included in the quote (e.g., public key hash).
+- `Signature`: ECDSA signature over the Quote.
 
-```
-DCAPEndorsements {
-  QEIdentity: byte[],         // Quoting Enclave Identity
-  TCBInfo: byte[],            // Trusted Computing Base info
-  QECertificationData: byte[] // Certification data for the attestation key
-}
-```
+### `TDReport`
 
-### TDXMeasurements
+Contains the measurement registers and report data from the TEE.
 
-Contains various measurement registers for workload identity:
-
-```
-struct TDXMeasurements {
-  bytes MRTD;             // Initial TD measurement (boot loader, initial data)
-  bytes[4] RTMR;          // Runtime measurements (extended at runtime)
-  bytes MROWNER;          // Contains operator's public key (Ethereum address or other identifier)
-  bytes MRCONFIGID;       // Hash of service configuration stored onchain and fetched on boot
-  bytes MROWNERCONFIG;    // Contains unique instance ID chosen by the operator
-}
-```
-
-### SignatureTransaction
-
-Special transaction format for including TEE signatures in blocks:
-
-```
-SignatureTransaction {
-  // Standard transaction fields with special values
-  to: TEE_SIGNATURE_CONTRACT_ADDRESS,
-  from: TEE_BUILDER_ADDRESS,
-  value: 0,
-  
-  // The signature data is included in the transaction input
-  data: abi.encode(
-      signature
-  )
-}
+```python
+class TDReport():
+    MRTD: Bytes48
+    RTMR: List[Bytes48]  // Size 4
+    MROWNER: Bytes48
+    MRCONFIGID: Bytes48
+    MROWNER_CONFIG: Bytes48
+    ReportData: Bytes64
 ```
 
-### ExpectedMeasurement
+**Field descriptions:**
 
-Defines trusted workload with identity hash, validity period, and code info:
+- `MRTD`: Measurement register for the TD (initial code/data).
+- `RTMR`: Runtime measurement registers.
+- `MROWNER`: Measurement register for the owner (policy).
+- `MRCONFIGID`: Configuration ID.
+- `MROWNER_CONFIG`: Owner-defined configuration.
+- `ReportData`: User-defined data included in the report (e.g., public key hash).
 
-```
-struct ExpectedMeasurement {
-  bytes32 workloadIdentity;   // The derived workload identity hash
-  uint64 startBlock;          // L2 block height from which this measurement is valid
-  uint64 endBlock;            // L2 block height until which this measurement is valid
-  bytes32 codeCommitHash;     // Git commit hash of source code
-  bytes32 buildInfoHash;      // Hash of build information and dependencies
-  string metadataURI;         // URI to additional metadata (build instructions, etc.)
-}
-```
+### `DCAPEndorsements`
 
-### CoordinatorInfo
+Data provided by Intel to verify the authenticity of a TDX Quote.
 
-Stores coordinator data including workload identity and public key:
-
-```
-struct CoordinatorInfo {
-  bytes32 workloadIdentity;
-  bytes publicKey;
-  uint64 registrationTime;
-  uint64 expirationTime;
-  bool active;
-}
+```python
+class DCAPEndorsements():
+    QEIdentity: Bytes
+    TCBInfo: Bytes
+    QECertificationData: Bytes
 ```
 
-### X.509 Certificates
+**Field descriptions:**
 
-Used in dual certificate model for TLS and block signing:
+- `QEIdentity`: Quoting Enclave Identity.
+- `TCBInfo`: Trusted Computing Base information.
+- `QECertificationData`: Certification data for the attestation key.
 
-#### TLS Certificate
+### `TDXMeasurements`
 
-```
-X.509 Certificate {
-  Version: 3
-  Subject: CN=BlockBuilderNode-TLS, O=L2TEEBuilder
-  Issuer: CN=TEECoordinator, O=L2TEECoordinator
-  Validity: <Issue time> to <Issue time + 7 days>
-  Subject Public Key Info: <Builder's ephemeral TLS public key>
-  Extensions:
-      SubjectAltName: DNS:builder.example.com, IP:192.0.2.1
-      ...
-      X509v3 Extended Key Usage: TLS Web Server Authentication, TLS Web Client Authentication
-      
-      # TDX attestation data included as certificate extension
-      Custom Extension OID 1.3.6.1.4.1.12345.1.1: <TDX Quote>
-  Signature: <Coordinator's signature>
-}
+A structured representation of the TDX measurement registers.
+
+```python
+class TDXMeasurements():
+    MRTD: Bytes
+    RTMR: List[Bytes]  // Size 4
+    MROWNER: Bytes
+    MRCONFIGID: Bytes
+    MROWNERCONFIG: Bytes
 ```
 
-#### Block Signing Certificate
+**Field descriptions:**
 
-```
-X.509 Certificate {
-  Version: 3
-  Subject: CN=BlockBuilderNode-Signer, O=L2TEEBuilder
-  Issuer: CN=TEECoordinator, O=L2TEECoordinator
-  Validity: <Issue time> to <Issue time + 30 days>
-  Subject Public Key Info: <Builder's deterministic signing public key>
-  Extensions:
-      ...
-      
-      # TDX attestation data included as certificate extension
-      Custom Extension OID 1.3.6.1.4.1.12345.1.1: <TDX Quote>
-  Signature: <Coordinator's signature>
-}
-```
-
-## Protocol Components
-
-The protocol consists of three key components:
-
-1. **TEE Attestation**: Mechanism to prove that a block builder is running inside a genuine TEE with the expected code
-2. **Block Signatures**: Method for signing blocks inside the TEE and verifying these signatures
-3. **Expected Measurements**: System for publishing and verifying trusted code configurations
+- `MRTD`: Initial TD measurement (boot loader, initial data).
+- `RTMR`: Runtime measurements (extended at runtime).
+- `MROWNER`: Contains the operator's public key (Ethereum address or other identifier).
+- `MRCONFIGID`: Hash of service configuration stored onchain and fetched on boot.
+- `MROWNERCONFIG`: Contains unique instance ID chosen by the operator.
 
 ## TEE Attestation Mechanism
 
@@ -235,11 +241,41 @@ The attestation process follows these steps:
 2. The Quote Enclave (QE) creates a Quote by signing the TD Report with an Attestation Key
 3. The Quote can be verified against Intel's Provisioning Certification Service (PCS)
 
-### DCAP Attestation Endorsements
+### On-Chain DCAP Attestation
 
-To validate a TDX Quote, a verifier needs the (simplified) [DCAP Endorsements](#dcapendorsements) structure.
+The following code sample illustrates how DCAP attestation verification is performed on-chain, and how the key components (workloadId, tcbHash, and Ethereum address) are extracted and registered in the Flashtestations allowlist:
 
-These endorsements provide the trust anchor for the Intel attestation infrastructure.
+```solidity
+// Sample interaction with Automata DCAP Attestation
+function registerTEEService(bytes calldata rawQuote) {
+    // Verify the DCAP quote on-chain using Automata's verifier
+    // Note: The verifier internally checks the quote against current collateral
+    bool isValid = IDCAPAttestation(DCAP_ATTESTATION_CONTRACT).verifyAndAttestOnChain(rawQuote);
+    require(isValid, "Invalid DCAP quote");
+    
+    // Extract and convert address from quote's report data
+    address ethAddress = extractAddressFromQuote(rawQuote);
+    
+    // Extract workload identity from quote measurements
+    bytes32 workloadId = extractWorkloadIdFromQuote(rawQuote);
+
+    // Get the current endorsement hash (tcbHash) that was used for verification
+    // This represents the specific Intel collateral bundle that validated this quote
+    bytes32 tcbHash = IDCAPAttestation(DCAP_ATTESTATION_CONTRACT).getCurrentEndorsementHash();
+    
+    // Register the address in the allowlist
+    IAllowlist(ALLOWLIST_CONTRACT).addAddress(workloadId, tcbHash, ethAddress);
+    
+    emit TEEServiceRegistered(workloadId, tcbHash, ethAddress);
+}
+```
+
+This implementation highlights several key aspects:
+1. The DCAP attestation is verified using Automata's on-chain verifier
+2. The workloadId is derived from the quote's measurement registers
+3. The Ethereum address is extracted from the quote's report data
+4. The tcbHash representing the current Intel endorsements is obtained
+5. The extracted information is registered in the allowlist
 
 ## Workload Identity and Key Management
 
@@ -250,18 +286,7 @@ A TEE's workload identity is derived from a combination of its measurement regis
 The workload identity computation takes these registers into account:
 
 ```
-function DeriveWorkloadIdentity(measurements TDXMeasurements) bytes32 {
-    return SHA256(
-        measurements.MRTD    ||
-        measurements.RTMR[0] ||
-        measurements.RTMR[1] || 
-        measurements.RTMR[2] || 
-        measurements.RTMR[3] ||
-        measurements.MROWNER ||
-        measurements.MROWNERCONFIG ||
-        measurements.MRCONFIGID
-    );
-}
+keccak256(abi.encodePacked(MRTD, RTMR0, RTMR1, RTMR2, RTMR3, MROWNER, MROWNERCONFIG, MRCONFIGID)))
 ```
 
 These measurement registers serve specific purposes in the permissioned attestation model:
@@ -272,635 +297,280 @@ These measurement registers serve specific purposes in the permissioned attestat
 
 All of these values are captured in the workload identity hash, ensuring that any change to the code, configuration, or operator results in a different identity that must be explicitly authorized through governance.
 
-### Extended Identity with Operator
+## Allowlist Registry
 
-The system uses a permissioned model where operators must be explicitly authorized to run specific workloads. The operator's identity is established through:
+The Allowlist Registry is a core component of Flashtestations that acts as a bookkeeper for tracking which Ethereum addresses have successfully passed attestation within a Trusted Execution Environment (TEE).
 
-1. The **MROWNER** field containing the operator's public key
-2. The **MROWNERCONFIG** field containing a unique instance ID chosen by the operator
+### Core Concepts
 
-During TEE initialization, the operator must authenticate itself by providing a signature of the instance ID using the private key corresponding to the public key in MROWNER. This signature is delivered through a secure channel (cloud-init, shared mount, attested TLS, etc.). The TEE verifies this signature before proceeding with registration.
+At its most abstract level, the Allowlist Registry is responsible for:
 
-This approach ensures that:
-- Only authorized operators can run specific workloads
-- Each TEE instance has a unique, operator-authenticated identity
-- The TEE self-enforces operator authentication before operation
+1. **Storing addresses** that have been validated through attestation
+2. **Associating addresses** with their specific workload identity
+3. **Tracking which endorsement bundle** validated each address
+4. **Providing efficient lookup** capabilities to verify if an address is authorized
 
-### Dual Certificate Model and Key Derivation
+The registry operates on these key abstractions:
 
-The block builder utilizes two separate certificates for different purposes:
+1. **Workload Identity (`workloadId`)**: A 32-byte hash derived from TDX measurement registers (as defined in [Workload Identity Derivation](#workload-identity-derivation)) that uniquely identifies a specific piece of code running in a TDX environment. This serves as the primary namespace under which addresses are stored.
 
-1. **[TLS Certificate](#tls-certificate)**: Ephemeral certificate used for secure communications
-2. **[Block Signing Certificate](#block-signing-certificate)**: Deterministically derived and used for signing blocks
+2. **Intel Endorsements (`tcbHash`)**: A unique identifier representing Intel's opinion at a specific point in time about which hardware and firmware configurations are secure. Conceptually, the `tcbHash` is a keccak256 hash derived from the endorsements (also called collateral):
 
-Both certificates are generated within the attested TEE and signed by the coordinator, but they serve different purposes and have different properties. This approach enables deterministic key recovery for the signing key and creates a cryptographic binding between the attestation and both certificates. For more details, see the [Dual Certificate Model](#dual-certificate-model) section.
-This is an opinionated approach and isn’t strictly necessary. One could also use the ephemeral TLS key. However using the key for two different communication channels is generally considered bad practice and a potential security issue.
-
-## Block Signatures and Verification
-
-**Figure 1: Block Signing Process**
-
-![Block Signing Process](block-signing-process.svg)
-
-### Block Signing Process
-
-When building a block, the TEE block builder:
-
-1. Produces a block according to the L2 protocol rules
-2. Computes the signature target using the `ComputeSignatureTarget` function:
    ```
-   function ComputeSignatureTarget(block, transactions) {
-       // Create ordered list of all transaction hashes
-       transactionHashes = []
-       for each tx in transactions:
-           txHash = keccak256(rlp_encode(tx))
-           transactionHashes.append(txHash)
-       
-       // Compute a single hash over block data and transaction hashes
-       // This ensures the signature covers the exact transaction set and order
-       return keccak256(abi.encode(
-           block.parentHash,
-           block.number,
-           block.timestamp,
-           transactionHashes
-       ))
+   tcbHash = keccak256(DCAPEndorsements)
+   ```
+
+   These endorsements (described in [DCAP Attestation Endorsements](#dcap-attestation-endorsements)) change periodically as Intel releases updates or discovers vulnerabilities. 
+   
+   **Note:** This is an abstract representation - the actual implementation will need to adhere to the way Automata's on-chain PCCS system describes and updates collateral/endorsements, which involves more complex data structures and lifecycle management.
+   
+   **Note 2:** Another thing which isn't addressed yet is how we can remove tcbhash entries from the allow list. They will need to be removed if the actual collateral gets stale. The remove method needs to check this, so we need a tcbHash -> collatoral mapping. This will likely be to expensive to maintain onchain, but keeping the offchain mapping and passing it to the remove method should be possible.
+
+3. **Ethereum Address**: The public key extracted from the attestation's report data field ([TDReport.ReportData](#tdreport)), which will be used to interact with on-chain contracts.
+
+### Key Relationship Model
+
+The Allowlist Registry maintains a strict relationship between these entities:
+
+1. For each `(address, workloadId)` pair, there is exactly **one** associated `tcbHash`
+2. Each address can be registered for multiple different workloads
+3. Many addresses can share the same workloadId
+4. Many addresses can be validated against the same tcbHash
+
+This means each entry in the allowlist is a unique combination of `(address, workloadId, tcbHash)`. If an address re-registers for the same workloadId with a newer endorsement, the old entry is replaced rather than maintaining multiple entries.
+
+### Fundamental Operations
+
+The Allowlist Registry provides these core operations:
+
+#### 1. Lookup
+
+The most frequent operation is checking if an address is valid for a specific workload:
+
+```
+function isAllowedWorkload(workloadId, address) → boolean
+```
+
+This simply checks if the address is currently associated with the specified workload. This operation must be highly gas-efficient as it may run on every block.
+
+#### 2. Registration
+
+When an attestation successfully passes verification:
+
+```
+function addAddress(workloadId, tcbHash, address)
+```
+
+This operation:
+1. Records that this address has been validated for this workload
+2. Associates it with the specific endorsement bundle (`tcbHash`) that validated it
+3. If the address was previously registered for this workloadId with a different tcbHash, the old entry is replaced
+
+#### 3. Endorsement Management
+
+When Intel endorsements become stale or insecure:
+
+```
+function removeEndorsement(workloadId, tcbHash)
+```
+
+This operation handles the case where a specific endorsement bundle is no longer considered secure:
+1. All addresses registered under this specific (workloadId, tcbHash) combination are removed completely
+2. This ensures only addresses with current, valid endorsements remain in the allowlist
+
+### Key Requirements
+
+1. **Single Current Endorsement**: An address has exactly one current endorsement bundle for each workloadId it's registered under.
+
+2. **Complete Revocation**: When an endorsement bundle becomes invalid, all addresses registered with that specific (workloadId, tcbHash) combination are removed completely - there is no partial revocation.
+
+3. **Gas Efficiency**: The lookup operation must be extremely efficient (O(1)) regardless of the number of addresses stored.
+
+## Policy Layer: Flexible Authorization
+
+The Policy layer sits above the Allowlist Registry and provides a more flexible authorization mechanism.
+
+### Policy Abstraction
+
+A Policy is simply a named group of workload identities:
+
+```
+PolicyId → [WorkloadId₁, WorkloadId₂, ..., WorkloadIdₙ]
+```
+
+This abstraction allows contracts to reference a policy (e.g., "L2-BlockBuilding-Production") rather than specific workloads, enabling governance to update which workloads are acceptable without modifying contract code.
+
+### Policy Operations
+
+The Policy layer provides these operations:
+
+```
+// Check if an address is allowed under any workload in a policy
+function isAllowedPolicy(policyId, address) → boolean
+
+// Governance operations
+function addWorkloadToPolicy(policyId, workloadId)
+function removeWorkloadFromPolicy(policyId, workloadId)
+```
+
+The key function `isAllowedPolicy` checks if an address is valid for ANY of the workloads in the policy group. Conceptually:
+
+```
+function isAllowedPolicy(policyId, address) {
+  workloadIds = getWorkloadsForPolicy(policyId);
+  
+  for each workloadId in workloadIds {
+    if (isAllowedWorkload(workloadId, address)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+```
+
+## End-to-End Flow
+
+The complete verification flow connects attestation, the allowlist, and the policy layer:
+
+### Attestation and Registration
+
+1. **TEE Environment**: A workload runs in a TDX environment and generates an attestation quote
+   - The attestation contains measurement registers (determining the `workloadId` as described in [Workload Identity Derivation](#workload-identity-derivation))
+   - The report data field contains an Ethereum public key
+
+2. **Verification Service**: An on-chain verification service validates this attestation
+   - Checks cryptographic signatures
+   - Validates against current Intel endorsements ([DCAPEndorsements](#dcapendorsements))
+   - Extracts the Ethereum address and workload measurements
+
+3. **Allowlist Registration**: Upon successful verification, the address is registered
+   ```
+   allowlist.addAddress(derivedWorkloadId, currentTcbHash, extractedAddress)
+   ```
+   - If the address was previously registered for this workloadId, the old entry is replaced
+
+### Runtime Authorization
+
+When a contract needs to verify if an operation is authorized:
+
+1. The contract checks if the sender is allowed under a specific policy:
+   ```
+   if (allowlist.isAllowedPolicy(POLICY_ID, msg.sender)) {
+     // Permit the operation
    }
-   
-   signatureTarget = ComputeSignatureTarget(block, block.transactions)
    ```
 
-   This signature target formulation provides a balance between rollup compatibility and verification strength:
-   
-   - Contains the minimal set of elements needed to uniquely identify a block's contents
-   - Compatible with data available on L1 for most optimistic and ZK rollup implementations
-   - Enables signature verification without requiring state root dependencies
-   - Supports future L1 verification of block authenticity across different rollup designs
-   
-   By focusing on transaction ordering and chain position rather than state transitions, this approach offers practical verification capabilities for TEE-produced blocks.
+2. This policy check determines if the address is allowed for any workload in the policy.
 
-3. Signs the signature target using its private key:
-   ```
-   signature = ECDSA_Sign(privateKey, signatureTarget)
-   ```
+### Maintenance: Handling Changing Endorsements
 
-### Signature Inclusion within Block
+Intel endorsements change over time, requiring a maintenance process:
 
-To include the TEE signature within the block itself (making it verifiable on L1), the signature is added as a special final transaction in the block using the [SignatureTransaction](#signaturetransaction) format.
+1. **New Endorsements**: When Intel publishes new endorsements:
+   - These are represented by a new `tcbHash`
+   - Future attestations are verified against these endorsements
+   - Addresses that re-attest will have their allowlist entries updated with the new tcbHash
 
-This approach has several advantages:
-1. It works with standard L2 block structures without protocol changes
-2. The signature is included in data posted to L1 as part of the rollup process
-3. It creates a permanent on-chain record verifiable by any party
-4. It maintains compatibility across different L2 implementations
+2. **Stale Endorsements**: When Intel marks certain configurations as insecure:
+   - The system must remove all addresses registered under the stale (workloadId, tcbHash) combinations
+   - This maintenance operation keeps the allowlist in sync with Intel's current security opinions
 
-After adding the signature transaction, the final block and signature are sent to the requestor (e.g., Rollup Boost)
+3. **Housekeeping Challenge**: 
+   - The system must efficiently track which (workloadId, tcbHash) combinations are no longer valid
+   - When endorsements change, it must remove all addresses associated with those specific combinations
+   - This avoids the expensive approach of re-verifying all attestations
 
-### Block Verification Material
+This maintenance process ensures that at any point in time, the allowlist only contains addresses that would pass attestation against currently valid Intel endorsements.
 
-For block verification, the [SignatureTransaction](#signaturetransaction) is included as the final transaction in the block, while additional verification material depends on the verification model:
+## Transparency Log
 
-#### PKI-based Verification
-For the PKI-based approach, verification requires:
-- The block with its [SignatureTransaction](#signaturetransaction)
-- The [Block Signing Certificate](#block-signing-certificate) of the block builder (signed by the coordinator)
-- The coordinator's CA certificate (for the trust chain)
+The L2 blockchain functions as a transparency log within Flashtestations, maintaining a permanent record of attestation events and their verification. This log provides auditability, verifiability, and transparency for the entire TEE attestation ecosystem.
 
-#### Direct Attestation Verification
-For direct attestation, verification requires:
-- The block with its [SignatureTransaction](#signaturetransaction)
-- The attestation record of the block builder
-- Expected measurements for verification
+### Purpose and Benefits
 
-### Block Verification
+The transparency log serves several critical functions:
+1. **Public Verifiability**: Anyone can independently verify that attestations were properly validated
+2. **Historical Tracking**: Provides a complete history of which TEEs were registered when, and under which endorsements
+3. **Audit Trail**: Creates an immutable record that can be used for forensic analysis or compliance
+4. **Endorsement Evolution**: Tracks how Intel's hardware/firmware security evaluations change over time
 
-Blocks can be verified using one of two methods, depending on the verification model used:
+### Logged Information
 
-**Figure 2: Block Verification Comparison**
+The transparency log captures raw attestation data along with verification results:
 
-```mermaid
-flowchart TD
-    %% Headers
-    PKI[PKI Verification Model]:::header
-    DIRECT[Direct Attestation Model]:::header
-    
-    %% PKI Model
-    PKI --- A1
-    A1[TEE Block Builder] -->|1 - Attestation| B1[TEE Coordinator/CA]
-    B1 -->|2 - Issues certificate| A1
-    A1 -->|3 - Signs block| C1[Block with Signature]
-    C1 -->|4 - Block + Certificate| D1[Verifier]
-    D1 -->|5 - Verifies cert chain| B1
-    D1 -->|6 - Verifies signature| C1
-    
-    %% Direct Attestation Model
-    DIRECT --- A2
-    A2[TEE Block Builder] -->|1 - Generates quote| B2[Attestation Record]
-    B2 -->|2 - Register on chain| C2[On-Chain Registry]
-    A2 -->|3 - Signs block| D2[Block with Signature]
-    D2 -->|4 - Block + Quote Reference| E2[Verifier]
-    C2 -->|5 - Retrieve Attestation| E2
-    E2 -->|6 - Verify against registry| C2
-    
-%% Styles
-    classDef header fill:#333,color:#fff,stroke:#333,stroke-width:2px
-    style A1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px,color:#000
-    style B1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px,color:#000
-    style C1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px,color:#000
-    style D1 fill:#e6f2ff,stroke:#0066cc,stroke-width:2px,color:#000
+1. **Raw Attestation Quotes**: The complete DCAP quotes submitted for verification
+2. **Intel Endorsements**: The actual endorsement data (collateral) used to validate attestations
+3. **Verification Events**: Records of successful and failed attestation attempts
+4. **Endorsement Updates**: Records of when new Intel endorsements are published or old ones revoked
 
-    style A2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px,color:#000
-    style B2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px,color:#000
-    style C2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px,color:#000
-    style D2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px,color:#000
-    style E2 fill:#ffefcc,stroke:#ff9900,stroke-width:2px,color:#000
-```
+### Implementation Approach
 
-#### PKI-based Verification
-
-In the PKI model, verifiers use the coordinator's CA certificate to establish a chain of trust.
-
-The verification function below uses the [TDXQuote](#tdxquote) and [TDReport](#tdreport) structures:
-
-```
-function VerifyBlockWithPKI(block, signingCertificate, coordinatorCACert, dcapEndorsements) {
-    // 1. Verify the signing certificate was signed by a trusted coordinator
-    if !VerifyCertificateChain(signingCertificate, coordinatorCACert) {
-        return false
-    }
-    
-    // 2. Extract the builder's signing public key from the certificate
-    signingPublicKey = signingCertificate.PublicKey
-    
-    // 3. Get the final signature transaction
-    signatureTx = block.transactions[block.transactions.length - 1]
-    
-    // 4. Extract signature from the transaction
-    signature = abi.decode(signatureTx.data)
-    
-    // 5. Get all transactions except the final signature transaction
-    normalTransactions = block.transactions.slice(0, block.transactions.length - 1)
-    
-    // 6. Compute the signature target
-    computedTarget = ComputeSignatureTarget(block, normalTransactions)
-    
-    // 7. Verify the signature using the signing public key
-    if !ECDSA_Verify(signingPublicKey, computedTarget, signature) {
-        return false
-    }
-    
-    // 8. Verify the TDX attestation from certificate extension
-    tdxQuote = signingCertificate.Extensions["TDXQuote"]
-    
-    // 8a. Verify the DCAP attestation signature with Intel DCAP Endorsements
-    if !VerifyAttestationSignature(tdxQuote, dcapEndorsements) {
-        return false
-    }
-    
-    // 8b. Verify the public key hash in quote matches the certificate's
-    reportData = tdxQuote.TDReport.ReportData
-    publicKeyHash = SHA256(signingPublicKey)
-    if !ConstantTimeEquals(reportData[:32], publicKeyHash) {
-        return false
-    }
-    
-    // 8c. Derive and verify workload identity against ExpectedMeasurement records
-    workloadIdentity = DeriveWorkloadIdentity(tdxQuote)
-    if !MatchesExpectedMeasurement(workloadIdentity) {
-        return false
-    }
-    
-    return true
-}
-```
-
-#### Direct Attestation Verification
-
-For higher security use cases, verifiers can directly verify against attestations without relying on the coordinator's certificate.
-
-This verification approach also uses the [TDXQuote](#tdxquote) structure:
-
-```
-function VerifyBlockWithDirectAttestation(block, tdxQuote, dcapEndorsements, expectedMeasurements, signingPublicKey) {
-    // 1. Verify the DCAP attestation signature with Intel DCAP Endorsements
-    if !VerifyAttestationSignature(tdxQuote, dcapEndorsements) {
-        return false
-    }
-    
-    // 2. Derive workload identity from TDX quote
-    workloadIdentity = DeriveWorkloadIdentity(tdxQuote)
-    
-    // 3. Verify workload identity is authorized
-    if !MatchesExpectedMeasurement(workloadIdentity, expectedMeasurements) {
-        return false
-    }
-    
-    // 4. Verify the public key hash in quote matches the provided signing public key
-    reportData = tdxQuote.TDReport.ReportData
-    publicKeyHash = SHA256(signingPublicKey)
-    if !ConstantTimeEquals(reportData[:32], publicKeyHash) {
-        return false
-    }
-    
-    // 5. Get the final signature transaction
-    signatureTx = block.transactions[block.transactions.length - 1]
-    
-    // 6. Extract signature from the transaction
-    signature = abi.decode(signatureTx.data)
-    
-    // 7. Get all transactions except the final signature transaction
-    normalTransactions = block.transactions.slice(0, block.transactions.length - 1)
-    
-    // 8. Compute the signature target
-    computedTarget = ComputeSignatureTarget(block, normalTransactions)
-    
-    // 9. Verify the signature using the signing public key
-    if !ECDSA_Verify(signingPublicKey, computedTarget, signature) {
-        return false
-    }
-    
-    return true
-}
-```
-
-## Certificate Authority Model
-?
-In the PKI model, a coordinator running in its own TEE acts as a Certificate Authority (CA):
-
-1. The coordinator generates a CA key pair within its TEE
-2. The coordinator publishes its attestation on-chain using Automata DCAP Attestation
-3. The coordinator's public key is published as part of the attestation
-4. Verifiers check that the coordinator's attestation matches expected measurements
-
-### On-Chain DCAP Attestation for Coordinator
-
-To establish trust in the coordinator, its TEE attestation is verified on-chain:
+The transparency log is implemented through a combination of blockchain events and calldata storage:
 
 ```solidity
-// Sample interaction with Automata DCAP Attestation
-function registerCoordinator(bytes calldata rawQuote) external onlyGovernance {
-    // Verify the DCAP quote on-chain
-    bool isValid = IDCAPAttestation(DCAP_ATTESTATION_CONTRACT).verifyAndAttestOnChain(rawQuote);
-    require(isValid, "Invalid DCAP quote");
-    
-    // Extract public key from quote's report data
-    bytes memory publicKey = extractPublicKeyFromQuote(rawQuote);
-    
-    // Extract workload identity from quote
-    bytes32 workloadIdentity = extractWorkloadIdentityFromQuote(rawQuote);
-    
-    // Check if this is an authorized coordinator workload
-    require(isAuthorizedCoordinator(workloadIdentity), "Unauthorized coordinator");
-    
-    // Register the coordinator
-    coordinatorPublicKeys[workloadIdentity] = publicKey;
-    
-    emit CoordinatorRegistered(workloadIdentity, publicKey);
-}
+// Event definitions for the transparency log
+event AttestationSubmitted(
+    bytes indexed rawQuote,
+    bytes32 indexed workloadId,
+    bytes32 indexed tcbHash,
+    address ethAddress,
+    bool success
+);
+
+event EndorsementUpdated(
+    bytes32 indexed tcbHash,
+    bytes rawEndorsementData,
+    bool isValid
+);
+
+event AllowlistUpdated(
+    bytes32 indexed workloadId,
+    bytes32 indexed tcbHash,
+    address indexed ethAddress,
+    bool isAdded
+);
 ```
 
-This approach leverages Automata's on-chain DCAP attestation to verify the coordinator's quote directly on-chain, ensuring that:
+When an attestation is verified, the raw quote data is included in the transaction calldata, making it permanently available on-chain. The verification results and extracted data are then emitted as events for efficient indexing and querying.
 
-1. The quote is genuine and signed by Intel
-2. The coordinator is running in a legitimate TEE
-3. The coordinator is running authorized code
-4. The coordinator's public key is authenticated
+### Relationship with Allowlist
 
+While the allowlist registry maintains the current authorized state (which addresses are currently valid for which workloads), the transparency log maintains the complete history of how that state evolved:
 
-*TODO(fnerdman):* the coordinator will likely want to register it's CA cert, rather than just it's public key?
+1. **Allowlist**: Optimized for efficient runtime checks and state updates
+2. **Transparency Log**: Optimized for auditability and historical verification
 
-### Dual Certificate Model
+This dual approach enables efficient on-chain operations while maintaining complete transparency and auditability.
 
-The block builder utilizes two separate certificates for different purposes:
+## Design Considerations
 
-1. **[TLS Certificate](#tls-certificate)**: Ephemeral certificate used for secure communications
-2. **[Block Signing Certificate](#block-signing-certificate)**: Deterministically derived and used for signing blocks
+### Replacement Model
 
-Both certificates are generated within the attested TEE and signed by the coordinator, but they serve different purposes and have different properties.
+The conceptual model uses a direct replacement approach:
 
-This is an opinionated approach and isn’t strictly necessary. One could also use the ephemeral TLS key. However using the key for two different communication channels is generally considered bad practice and a potential security issue.
+- When an address re-attests for a workloadId, its old entry is replaced with the new one
+- This keeps the model simpler by ensuring each address has exactly one current endorsement per workloadId
+- When endorsements become invalid, all addresses using that specific endorsement are removed completely
 
-### Certificate Issuance Process
+### Gas Optimization
 
-When a block builder node starts:
+The system must optimize for gas efficiency, particularly for the lookup operations:
 
-1. **TLS Certificate Bootstrapping**:
-   - The TEE generates an ephemeral ECDSA key pair for TLS
-   - It requests an attestation quote from the TDX platform
-   - It includes a hash of the TLS public key in the attestation quote's UserData field
-   - It sends the attestation quote and TLS public key to the coordinator
-   - The coordinator verifies:
-     - The attestation signature is valid using Intel's [DCAP Endorsements](#dcapendorsements)
-     - The attestation's measurements match an authorized workload identity
-     - The TLS public key hash matches the hash in the quote's UserData
-   - If verification succeeds, the coordinator issues a TLS certificate for the ephemeral key
-   - The block builder and coordinator establish a secure TLS connection using this certificate
+- Lookups should be O(1) regardless of the number of addresses
+- Storage slots should be fully cleared when no longer needed (to receive gas refunds)
+- Batch operations should be supported for removing addresses when endorsements become invalid
 
-2. **Block Signing Certificate Creation**:
-   - Over the secure TLS connection, the coordinator derives a unique seed for the block builder:
-     `derived_seed = HMAC-SHA256(coordinator_master_seed, workload_identity)`
-   - The coordinator securely transmits this derived seed to the block builder
-   - The block builder uses this seed to deterministically generate its signing key pair inside the TEE:
-     `(blockSigningPrivateKey, blockSigningPublicKey) = DeriveECDSAKeypair(derived_seed)`
-   - The block builder creates a CSR for the signing key and sends it to the coordinator
-   - The coordinator signs the block signing certificate and returns it
+### Separation of Concerns
 
-This two-stage process ensures that both certificates are cryptographically bound to the same attested TEE, while serving their distinct purposes.
+The design maintains clear separation between:
 
-**Figure 3: Certificate Issuance Process**
+1. **Allowlist Registry**: Tracks which addresses have attestations validated by current endorsements
+2. **Policy Registry**: Defines which workloads are acceptable for specific on-chain operations
+3. **Verification Service**: Validates attestations and updates the allowlist
+4. **Consumer Contracts**: Use policy checks to authorize operations
 
-```mermaid
-sequenceDiagram
-    participant BB as TEE Block Builder
-    participant TC as TEE Coordinator
-    participant IAS as Intel Attestation Service
-    
-    Note over BB,IAS: TLS Certificate Bootstrapping
-    
-    BB->>BB: Generate ephemeral TLS<br/>key pair
-    BB->>IAS: Request attestation quote
-    IAS->>BB: Return TDX quote with<br/>measurement registers
-    BB->>BB: Include TLS public key<br/>hash in quote's UserData
-    BB->>BB: Create CSR including public key<br/>and attestation quote
-    BB->>TC: Send CSR
-    
-    TC->>IAS: Verify quote with Intel's DCAP endorsements
-    IAS->>TC: Attestation verification result
-    
-    TC->>TC: Verify workload identity<br/>matches authorized measurements
-    TC->>TC: Verify public key hash in quote<br/>matches hash of key in CSR
-    
-    TC->>BB: Issue TLS certificate for ephemeral key
-    
-    Note over BB,TC: Secure TLS Connection Established
-    
-    Note over BB,TC: Block Signing Certificate Creation
-    
-    TC->>TC: Derive unique seed:<br/>HMAC-SHA256(coordinator_master_seed, workload_identity)
-    TC->>BB: Transmit derived seed over secure TLS
-    
-    BB->>BB: Generate signing key pair deterministically:<br/>DeriveECDSAKeypair(derived_seed)
-    BB->>IAS: Request new attestation quote
-    IAS->>BB: Return TDX quote
-    BB->>BB: Include signing public key<br/>hash in quote's UserData
-    BB->>BB: Create CSR including signing public key<br/>and attestation quote
-    BB->>TC: Send CSR for block signing certificate
-    
-    TC->>IAS: Verify quote with Intel's DCAP endorsements
-    IAS->>TC: Attestation verification result
-    TC->>TC: Verify CSR and public key<br/>match expectations
-    TC->>BB: Sign and return block signing certificate
-```
-
-Note that the coordinator does not need to separately verify if the workload identity is authorized, as this verification is implicitly performed during the registration of the coordinator itself. Since the coordinator is only registered if it runs authorized code, and it verifies the validity of the attestation, there is no need for additional authorization checks.
-
-### Attested TLS Certificate
-
-The ephemeral TLS certificate, as defined in the [TLS Certificate](#tls-certificate) section, is used solely for secure communications. It has a relatively short validity period of 7 days and includes extended key usage extensions for TLS authentication.
-
-### Block Signing Certificate
-
-The deterministically derived block signing certificate, as defined in the [Block Signing Certificate](#block-signing-certificate) section, is used for signing blocks. It has a longer validity period of 30 days and contains the builder's deterministic signing public key.
-
-When a client connects to a block builder service:
-1. The TLS handshake occurs using the ephemeral TLS certificate
-2. The client verifies the TLS certificate is signed by an authorized coordinator
-3. For block verification, the deterministic block signing certificate is used
-
-This dual certificate approach separates communication security from block signing while maintaining the same trust foundation for both.
-
-## Rollup Boost Integration
-
-Rollup Boost serves as a block builder sidecar for L2 chains, connecting the sequencer to external block builders. When integrating with TEE block builders, Rollup Boost implements the following verification flow:
-
-1. **TLS Connection Establishment**:
-   - Rollup Boost connects to the TEE block builder using TLS
-   - It verifies the builder's ephemeral TLS certificate against the coordinator's CA certificate
-   - The TLS connection is used for secure communication with the block builder
-
-2. **Block Signing Certificate Retrieval**:
-   - Rollup Boost retrieves the block builder's signing certificate via a public endpoint
-   - This can be a simple HTTP endpoint like `/signing-certificate`
-   - The signing certificate's authenticity is verified through its signature by the coordinator:
-     ```
-     function RetrieveSigningCertificate() {
-         // Fetch the block signing certificate from the public endpoint
-         signingCertificate = FetchFromEndpoint("/signing-certificate")
-         
-         // Verify the signing certificate against the coordinator's CA
-         if !VerifyCertificateChain(signingCertificate, coordinatorCACert) {
-             return error("Invalid signing certificate")
-         }
-         
-         // Extract and store the signing public key
-         signingPublicKey = signingCertificate.PublicKey
-         
-         return signingPublicKey
-     }
-     ```
-
-3. **Block Request and Verification**:
-   - When Rollup Boost receives a block from the builder:
-     ```
-     function VerifyBuilderBlock(block) {
-         // Use the signing public key from the verified certificate
-         signingPublicKey = storedSigningCertificate.PublicKey
-         
-         // Get the final signature transaction
-         signatureTx = block.transactions[block.transactions.length - 1]
-         
-         // Extract signature from the transaction
-         signature = abi.decode(signatureTx.data)
-         
-         // Get all transactions except the final signature transaction
-         normalTransactions = block.transactions.slice(0, block.transactions.length - 1)
-         
-         // Compute the signature target
-         computedTarget = ComputeSignatureTarget(block, normalTransactions)
-         
-         // Verify signature
-         return ECDSA_Verify(signingPublicKey, computedTarget, signature)
-     }
-     ```
-
-4. **Block Forwarding**:
-   - If verification passes, Rollup Boost forwards the block to the sequencer
-   - If verification fails, Rollup Boost falls back to the local block production
-
-This verification process ensures that:
-- Only blocks from attested TEE builders are accepted
-- The TLS connection provides secure communication with the block builder
-- The block signing certificate is independently verified through the coordinator's signature
-- The block signature verification uses the deterministic signing key derived from the coordinator-provided seed
-- There's end-to-end verification from block production to inclusion in the L2 chain
-
-This verification process additionally ensures that:
-1. The [SignatureTransaction](#signaturetransaction) is properly formatted
-2. The signature covers the block without the final transaction
-3. The signature is valid for the attested TEE block builder
-4. The signature is included in the rollup data posted to L1
-
-## Service Connectivity and TLS Authentication
-
-Beyond block verification, secure communication with TEE services is critical. The protocol uses the same trust chain for both block signatures and service connectivity.
-
-### Service Discovery
-
-TEE services (block builders and coordinators) are discovered through a simple DNS-based mechanism:
-
-1. Each service is assigned a domain name (e.g., `coordinator.example.com`, `builder.example.com`)
-2. DNS records map these domain names to the IP addresses of the respective services
-3. Clients connect to services using these domain names
-4. Service identity is verified through TLS certificates containing the expected workload identity
-
-This approach separates service discovery from service verification:
-- DNS provides the network location (IP address) of the service
-- TLS certificates with TEE attestation provide cryptographic verification of service identity
-
-No additional on-chain discovery mechanism is required, as clients verify service identity using the same attestation mechanism used for block verification.
-
-The domain names are typically provided through:
-- Configuration files for the sequencer and other clients
-- Documentation for users who need to connect directly to the services
-- Administrative interfaces for operators
-
-When a client connects to a service:
-1. It resolves the domain name to an IP address using standard DNS
-2. It establishes a TLS connection to that IP address
-3. It verifies the TLS certificate against the coordinator's CA certificate
-4. It extracts and verifies the workload identity from the certificate
-5. Only if all verifications pass does it trust the connection
-
-This ensures that clients only communicate with legitimate, attested TEE services, even if the DNS infrastructure is compromised.
-
-### TLS Connection Verification
-
-When a client connects to a block builder service:
-
-```
-function VerifyTLSConnection(tlsCertificate, coordinators) {
-    // 1. Verify certificate chain
-    if !VerifyCertificateChain(tlsCertificate, coordinators) {
-        return "Invalid certificate chain"
-    }
-    
-    // 2. Check certificate revocation status
-    if IsRevoked(tlsCertificate.SerialNumber) {
-        return "Certificate revoked"
-    }
-    
-    // Note: No explicit workload identity verification is needed here
-    // as the coordinator has already verified the attestation when
-    // issuing the certificate
-    
-    return "Connection verified"
-}
-```
-
-### Block Signing Certificate Retrieval
-
-To retrieve a block builder's signing certificate:
-
-```
-function RetrieveSigningCertificate(builderEndpoint, coordinators) {
-    // 1. Fetch the signing certificate from the public endpoint
-    signingCertificate = FetchFromEndpoint(builderEndpoint + "/signing-certificate")
-    
-    // 2. Verify certificate chain
-    if !VerifyCertificateChain(signingCertificate, coordinators) {
-        return "Invalid certificate chain"
-    }
-    
-    // 3. Check certificate revocation status
-    if IsRevoked(signingCertificate.SerialNumber) {
-        return "Certificate revoked"
-    }
-    
-    // 4. Extract the signing public key
-    signingPublicKey = signingCertificate.PublicKey
-    
-    return "Certificate verified", signingPublicKey
-}
-```
-
-### TEE/Service Identity Verification
-
-With the dual certificate model, the verification process ensures:
-
-1. The TLS certificate secures communications with the block builder service
-2. The signing certificate authenticates blocks produced by the builder
-3. Both certificates are verified against the same coordinator CA
-4. Both certificates contain the same workload identity, binding them to the same attested TEE
-
-This separation of concerns provides clear boundaries between communication security and block authenticity while maintaining the cryptographic binding to the attested TEE.
-
-## Expected Measurements and On-Chain Verification
-
-### Expected Measurement Definition
-
-TEE measurements are hardware-enforced hashes of the code and initial data loaded into the TEE. For Intel TDX, the [ExpectedMeasurement](#expectedmeasurement) structure is used to track valid code configurations.
-
-These measurements are collected by the hardware during TEE initialization and cannot be forged by software.
-
-The workload identity (referenced in the [Workload Identity Derivation](#workload-identity-derivation) section) encompasses all measurement registers including MRTD, RTMRs, MROWNER, MRCONFIGID, and MROWNERCONFIG, ensuring that any change to the code, configuration, or operator results in a different identity that must be explicitly authorized.
-
-This permissioned model ensures that only authorized operators can run authorized workloads. The TEE enforces this by requiring operator authentication via signature verification of the instance ID before proceeding with registration.
-
-### On-Chain Verification System
-
-To securely track and verify expected measurements, the protocol leverages an on-chain verification system.
-
-The contract below references the [ExpectedMeasurement](#expectedmeasurement) and [CoordinatorInfo](#coordinatorinfo) structures defined earlier:
-
-```solidity
-contract TEEMeasurementRegistry {
-    // Registry of expected measurements indexed by workload identity
-    mapping(bytes32 => ExpectedMeasurement) public expectedMeasurements;
-    
-    // Registry of coordinator attestations verified through DCAP
-    mapping(bytes32 => CoordinatorInfo) public verifiedCoordinators;
-    
-    // Automata DCAP Attestation contract reference
-    IDCAPAttestation public dcapAttestationContract;
-    
-    // Struct definitions referenced from the Data Structures section
-    struct ExpectedMeasurement;
-    struct CoordinatorInfo;
-    
-    // Register a coordinator after verifying its DCAP quote on-chain
-    function registerCoordinator(bytes calldata rawQuote) external onlyGovernance {
-        // Verify the DCAP quote on-chain using Automata's verification
-        bool isValid = dcapAttestationContract.verifyAndAttestOnChain(rawQuote);
-        require(isValid, "Invalid DCAP quote");
-        
-        // Extract workload identity and public key from the quote
-        bytes32 workloadIdentity = extractWorkloadIdentityFromQuote(rawQuote);
-        bytes memory publicKey = extractPublicKeyFromQuote(rawQuote);
-        
-        // Verify this is an expected coordinator measurement
-        require(isExpectedCoordinator(workloadIdentity), "Unauthorized coordinator");
-        
-        // Register the coordinator
-        verifiedCoordinators[workloadIdentity] = CoordinatorInfo({
-            workloadIdentity: workloadIdentity,
-            publicKey: publicKey,
-            registrationTime: uint64(block.timestamp),
-            expirationTime: uint64(block.timestamp + 30 days), // Example validity period
-            active: true
-        });
-        
-        emit CoordinatorRegistered(workloadIdentity, publicKey);
-    }
-    
-    // Additional functions for measurement management
-    // ...
-}
-```
-
-This registry serves as the source of truth for:
-
-1. [ExpectedMeasurement](#expectedmeasurement) records for both coordinators and block builders
-2. Verified coordinator attestations and public keys
-3. Block builder authorization status
+This separation enables each component to evolve independently, with governance focused on the appropriate level of abstraction.
 
 ## Reproducible Builds
 
@@ -912,53 +582,3 @@ To establish trust in expected measurements, the TEE block builder must be built
 4. **Verification**: Independent parties can follow the build process and verify that it produces the same measurements
 
 This allows anyone to verify that the expected measurements correspond to the published source code.
-
-## Measurement Lifecycle
-
-Expected measurements follow a defined lifecycle:
-
-1. **Proposal**: New measurements are proposed with documentation of code changes
-2. **Review**: The changes and build process are publicly reviewed
-3. **Testing**: The new version is tested in a staging environment
-4. **Publication**: Approved measurements are added to the registry with a future start block
-5. **Transition**: Both old and new measurements are valid during the transition period
-6. **Deprecation**: Old measurements are eventually deprecated by setting an end block
-
-## Measurement Updates
-
-Updates to [ExpectedMeasurement](#expectedmeasurement) records are required in several scenarios:
-
-1. **Security Patches**: Critical security fixes require immediate updates
-2. **Feature Additions**: New functionality requires code changes
-3. **Library Updates**: Dependencies need to be updated periodically
-4. **Configuration Changes**: Protocol parameters may change
-
-The update process ensures that:
-
-1. The security of the system is maintained during transitions
-2. Users have sufficient notice of pending changes
-3. Independent verification is possible before adoption
-
-## Security Considerations
-
-Several security considerations apply to the TEE block builder verification protocol:
-
-1. **Update Timing**: Updates must be scheduled to allow sufficient time for verification but quick enough to address security issues
-
-2. **Revocation**: The system must allow for emergency revocation of compromised measurements
-
-3. **Governance Security**: The governance mechanism for updating measurements must be secure against takeover attempts
-
-4. **Build Reproducibility**: Minor differences in build environments can lead to different measurements, creating false negatives in verification
-
-5. **Certificate Revocation**: [TLS Certificate](#tls-certificate) has a short validity period (7 days) and [Block Signing Certificate](#block-signing-certificate) has a longer validity period (30 days) to minimize the impact of key compromise. Additionally, a certificate revocation list (CRL) is maintained by the coordinator.
-
-6. **Time of Check/Time of Use (TOCTOU)**: Block verification checks that the workload identity was valid at the time the block was produced, preventing attacks where a malicious operator might try to use a revoked measurement.
-
-7. **Replay Protection**: Block signatures include block numbers and parent hashes, preventing replay attacks where an attacker might try to reuse signatures from previous blocks.
-
-8. **Key Rotation**: Even though keys are derived deterministically, regular rotation schedules can be implemented by including a time component in the seed derivation.
-
-9. **DCAP Endorsements Freshness**: [DCAP Endorsements](#dcapendorsements) have validity periods. Verifiers must ensure they use up-to-date endorsements from Intel's PCS.
-
-10. **Chain of Trust**: The security of the entire system depends on the integrity of the attestation mechanism, the correctness of expected measurements, and the proper implementation of the verification protocol.
