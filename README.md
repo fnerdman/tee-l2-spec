@@ -1,4 +1,4 @@
-# Flashtestations: Transparent Onchain TEE Verification and Curated Allowlist Protocol
+ Flashtestations: Transparent Onchain TEE Verification and Curated Allowlist Protocol
 
 ## Table of Contents
 - [Introduction](#introduction)
@@ -127,9 +127,9 @@ The terms in this section are used consistently throughout the specification doc
 
 **Quote**: The cryptographically signed data structure produced during attestation, containing measurement registers and report data fields that uniquely identify the TEE and its contents. Flashtestations supports the DCAP v5 Quote format.
 
-**Intel DCAP collateral**: Data provided by Intel that serves as the trust anchor for attestation verification. This includes QE Identity information, TCB Info, certificates, and related data. Also referred to as "Endorsements" in some contexts.
+**Intel DCAP endorsements**: Data provided by Intel that serves as the trust anchor for attestation verification. This includes QE Identity information, TCB Info, certificates, and related data. Also referred to as "Endorsements" in some contexts.
 
-**Endorsements**: See Intel DCAP collateral.
+**Collateral**: See Intel DCAP endorsements. It carries the same meaning. This is not monetary collateral as in crypto-economic systems. Some sources, such as Automatas [onchain PCCS](https://github.com/automata-network/automata-on-chain-pccs) uses collateral as the go to term.
 
 **TCB (Trusted Computing Base)**: The set of hardware, firmware, and software components critical to a system's security. In TDX, the TCB includes Intel CPU hardware, microcode, and firmware components that must be at approved security levels.
 
@@ -147,7 +147,7 @@ The terms in this section are used consistently throughout the specification doc
 
 **`workloadId`**: A 32-byte hash uniquely identifying a specific TEE workload based on its measurement registers. Derived as keccak256(MRTD || RTMR[0..3] || MROWNER || MROWNERCONFIG || MRCONFIGID).
 
-**`tcbHash`**: A 32-byte hash representing a specific Intel DCAP collateral bundle at a point in time. This is a Flashtestations-calculated keccak256 hash of the collateral components obtained from Automata's onchain PCCS, not a value provided directly by Intel.
+**`tcbHash`**: A 32-byte hash representing a specific Intel DCAP endorsements bundle at a point in time. This is a Flashtestations-calculated keccak256 hash of the endorsements components obtained from Automata's onchain PCCS, not a value provided directly by Intel.
 
 **Allowlist Registry**: The onchain data structure that tracks which Ethereum addresses have been validated for specific workloads based on successful attestation. Implemented as the TdxAllowlist contract.
 
@@ -155,13 +155,13 @@ The terms in this section are used consistently throughout the specification doc
 
 **Transparency Log**: The onchain event-based system that records all attestation verifications, allowlist changes, and endorsement updates for auditability. Implemented through emitted blockchain events rather than as a separate logging service.
 
-**Onchain Verifier**: The smart contract component (using Automata's DCAP attestation system) that validates TDX attestation quotes against current Intel DCAP collateral and interacts with the Allowlist Registry to register validated addresses.
+**Onchain Verifier**: The smart contract component (using Automata's DCAP attestation system) that validates TDX attestation quotes against current Intel DCAP endorsements and interacts with the Allowlist Registry to register validated addresses.
 
 **Workload**: The specific software running inside a TEE. Its identity is derived from measurement registers that contain cryptographic hashes of loaded code and configuration.
 
 **`policyId`**: An identifier that maps to a list of approved `workloadId`s, enabling contracts to reference policies rather than specific workloads.
 
-**PCCS (Provisioning Certificate Caching Service)**: Automata's onchain implementation of Intel's PCCS that stores Intel DCAP collateral on the blockchain, making it available for attestation verification. This ensures all verification is reproducible on L2.
+**PCCS (Provisioning Certificate Caching Service)**: Automata's onchain implementation of Intel's PCCS that stores Intel DCAP endorsements on the blockchain, making it available for attestation verification. This ensures all verification is reproducible on L2.
 
 ### Operational Terms
 
@@ -289,7 +289,7 @@ The following code sample illustrates how DCAP attestation verification is perfo
 // Sample interaction with Automata DCAP Attestation
 function registerTEEService(bytes calldata rawQuote) {
     // Verify the DCAP quote onchain using Automata's verifier
-    // Note: The verifier internally checks the quote against current collateral
+    // Note: The verifier internally checks the quote against current endorsements
     bool isValid = IDCAPAttestation(DCAP_ATTESTATION_CONTRACT).verifyAndAttestOnChain(rawQuote);
     require(isValid, "Invalid DCAP quote");
     
@@ -300,7 +300,7 @@ function registerTEEService(bytes calldata rawQuote) {
     bytes32 workloadId = extractWorkloadIdFromQuote(rawQuote);
 
     // Get the current endorsement hash (tcbHash) that was used for verification
-    // This represents the specific Intel collateral bundle that validated this quote
+    // This represents the specific Intel endorsements bundle that validated this quote
     bytes32 tcbHash = IDCAPAttestation(DCAP_ATTESTATION_CONTRACT).getCurrentEndorsementHash();
     
     // Register the address in the allowlist
@@ -352,7 +352,7 @@ The registry operates on these key abstractions:
 
 1. **Workload Identity (`workloadId`)**: A 32-byte hash derived from TDX measurement registers (as defined in [Workload Identity Derivation](#workload-identity-derivation)) that uniquely identifies a specific piece of code running in a TDX environment. This serves as the primary namespace under which addresses are stored.
 
-2. **Intel Endorsements (`tcbHash`)**: A unique identifier representing Intel's opinion at a specific point in time about which hardware and firmware configurations are secure. Conceptually, the `tcbHash` is a keccak256 hash derived from the endorsements (also called collateral):
+2. **Intel Endorsements (`tcbHash`)**: A unique identifier representing Intel's opinion at a specific point in time about which hardware and firmware configurations are secure. Conceptually, the `tcbHash` is a keccak256 hash derived from the endorsements:
 
    ```
    tcbHash = keccak256(DCAPEndorsements)
@@ -360,9 +360,9 @@ The registry operates on these key abstractions:
 
    These endorsements (described in [DCAP Attestation Endorsements](#dcap-attestation-endorsements)) change periodically as Intel releases updates or discovers vulnerabilities. 
    
-   **Note:** This is an abstract representation - the actual implementation will need to adhere to the way Automata's onchain PCCS system describes and updates collateral/endorsements, which involves more complex data structures and lifecycle management.
+   **Note:** This is an abstract representation - the actual implementation will need to adhere to the way Automata's onchain PCCS system describes and updates endorsements/endorsements, which involves more complex data structures and lifecycle management.
    
-   **Note 2:** Another thing which isn't addressed yet is how we can remove tcbhash entries from the allow list. They will need to be removed if the actual collateral gets stale. The remove method needs to check this, so we need a tcbHash -> collatoral mapping. This will likely be to expensive to maintain onchain, but keeping the offchain mapping and passing it to the remove method should be possible.
+   **Note 2:** Another thing which isn't addressed yet is how we can remove tcbhash entries from the allow list. They will need to be removed if the actual endorsements gets stale. The remove method needs to check this, so we need a tcbHash -> endorsements mapping. This will likely be to expensive to maintain onchain, but keeping the offchain mapping and passing it to the remove method should be possible.
 
 3. **Ethereum Address**: The public key extracted from the attestation's report data field ([TDReport.ReportData](#tdreport)), which will be used to interact with onchain contracts.
 
@@ -539,7 +539,7 @@ The transparency log serves several critical functions:
 The transparency log captures raw attestation data along with verification results:
 
 1. **Raw Attestation Quotes**: The complete DCAP quotes submitted for verification
-2. **Intel Endorsements**: The actual endorsement data (collateral) used to validate attestations
+2. **Intel Endorsements**: The actual endorsement data (endorsements) used to validate attestations
 3. **Verification Events**: Records of successful and failed attestation attempts
 4. **Endorsement Updates**: Records of when new Intel endorsements are published or old ones revoked
 
