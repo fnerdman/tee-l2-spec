@@ -1,4 +1,4 @@
-# Flashtestations: Transparent On-Chain TEE Verification and Curated Allowlist Protocol
+# Flashtestations: Transparent Onchain TEE Verification and Curated Allowlist Protocol
 
 ## Table of Contents
 - [Introduction](#introduction)
@@ -15,7 +15,7 @@
   - [TDXMeasurements](#tdxmeasurements)
 - [TEE Attestation Mechanism](#tee-attestation-mechanism)
   - [Intel TDX DCAP Attestation](#intel-tdx-dcap-attestation)
-  - [On-Chain DCAP Attestation](#on-chain-dcap-attestation)
+  - [Onchain DCAP Attestation](#onchain-dcap-attestation)
   - [Workload Identity Derivation](#workload-identity-derivation)
 - [Allowlist Registry](#allowlist-registry)
   - [Core Concepts](#core-concepts)
@@ -42,11 +42,11 @@
 
 ## Introduction
 
-Trusted Execution Environments (TEEs) offer a promising approach for running confidential workloads with hardware-enforced security guarantees. However, integrating TEEs with blockchain applications presents significant challenges: How can smart contracts verify that they're interacting with authentic TEE services running expected code? How can this verification scale efficiently on-chain? How can we maintain an up-to-date registry of validated services as hardware security requirements evolve?
+Trusted Execution Environments (TEEs) offer a promising approach for running confidential workloads with hardware-enforced security guarantees. However, integrating TEEs with blockchain applications presents significant challenges: How can smart contracts verify that they're interacting with authentic TEE services running expected code? How can this verification scale efficiently onchain? How can we maintain an up-to-date registry of validated services as hardware security requirements evolve?
 
-Flashtestations addresses these challenges by providing a comprehensive on-chain protocol for TEE verification, address registration, and transparent record-keeping. The protocol enables:
+Flashtestations addresses these challenges by providing a comprehensive onchain protocol for TEE verification, address registration, and transparent record-keeping. The protocol enables:
 
-1. On-chain verification of Intel TDX attestations against current Intel endorsements
+1. Onchain verification of Intel TDX attestations against current Intel endorsements
 2. Maintenance of a curated allowlist of validated Ethereum addresses associated with specific TEE workloads
 3. Policy-based authorization for smart contracts to securely interact with TEE services
 4. Transparent logging of all attestation events and endorsement changes
@@ -69,14 +69,14 @@ Flashtestations is designed to achieve the following objectives:
 
 ## System Architecture
 
-The Flashtestations protocol consists of four key components that work together to provide secure on-chain TEE verification:
+The Flashtestations protocol consists of four key components that work together to provide secure onchain TEE verification:
 
 ```
 ┌─────────────────────┐                  ┌─────────────────────┐
-│ TDX VM              │                  │ On-Chain Verifier   │
+│ TDX VM              │                  │ Onchain Verifier    │
 │                     │  Attestation     │                     │
-│ ┌─────────────────┐ │  Quote          │ ┌─────────────────┐ │
-│ │ TEE Workload    │ │ ───────────────►│ │ DCAP Attestation│ │
+│ ┌─────────────────┐ │  Quote           │ ┌─────────────────┐ │
+│ │ TEE Workload    │ │ ───────────────► │ │ DCAP Attestation│ │
 │ │                 │ │                  │ │ Verifier        │ │
 │ │ (workloadId)    │ │                  │ │                 │ │
 │ └─────────────────┘ │                  │ └────────┬────────┘ │
@@ -106,9 +106,9 @@ The Flashtestations protocol consists of four key components that work together 
 └─────────────────────┘
 ```
 
-1. **On-Chain Verifier**: Validates TDX attestation quotes against current Intel endorsements
+1. **Onchain Verifier**: Validates TDX attestation quotes against current Intel endorsements
 2. **Allowlist Registry**: Tracks which addresses have valid attestations for specific workloads
-3. **Policy Registry**: Defines which workloads are acceptable for specific on-chain interactions
+3. **Policy Registry**: Defines which workloads are acceptable for specific onchain interactions
 4. **Transparency Log**: Records all attestations and endorsement changes (implemented via events)
 
 ## Terminology
@@ -139,7 +139,7 @@ The terms in this section are used consistently throughout the specification doc
 
 **Quote Enclave (QE)**: Intel-provided enclave responsible for signing attestation quotes using Intel-provisioned keys. The QE creates the cryptographic binding between measurement registers and the attestation signature.
 
-**Provisioning Certification Service (PCS)**: Intel's service that provides the certificates and related data needed to verify attestation quotes. In Flashtestations, we use Automata's on-chain PCCS, which stores this data on the blockchain.
+**Provisioning Certification Service (PCS)**: Intel's service that provides the certificates and related data needed to verify attestation quotes. In Flashtestations, we use Automata's onchain PCCS, which stores this data on the blockchain.
 
 **Attestation Key (AK)**: The cryptographic key used by the Quote Enclave to sign attestation quotes. The validity of this key is established through a certificate chain back to Intel.
 
@@ -147,21 +147,21 @@ The terms in this section are used consistently throughout the specification doc
 
 **`workloadId`**: A 32-byte hash uniquely identifying a specific TEE workload based on its measurement registers. Derived as keccak256(MRTD || RTMR[0..3] || MROWNER || MROWNERCONFIG || MRCONFIGID).
 
-**`tcbHash`**: A 32-byte hash representing a specific Intel DCAP collateral bundle at a point in time. This is a Flashtestations-calculated keccak256 hash of the collateral components obtained from Automata's on-chain PCCS, not a value provided directly by Intel.
+**`tcbHash`**: A 32-byte hash representing a specific Intel DCAP collateral bundle at a point in time. This is a Flashtestations-calculated keccak256 hash of the collateral components obtained from Automata's onchain PCCS, not a value provided directly by Intel.
 
-**Allowlist Registry**: The on-chain data structure that tracks which Ethereum addresses have been validated for specific workloads based on successful attestation. Implemented as the TdxAllowlist contract.
+**Allowlist Registry**: The onchain data structure that tracks which Ethereum addresses have been validated for specific workloads based on successful attestation. Implemented as the TdxAllowlist contract.
 
 **Policy Registry**: A mapping system that groups related workload identities under a single policy identifier, enabling flexible authorization rules without modifying consumer contracts.
 
-**Transparency Log**: The on-chain event-based system that records all attestation verifications, allowlist changes, and endorsement updates for auditability. Implemented through emitted blockchain events rather than as a separate logging service.
+**Transparency Log**: The onchain event-based system that records all attestation verifications, allowlist changes, and endorsement updates for auditability. Implemented through emitted blockchain events rather than as a separate logging service.
 
-**On-chain Verifier**: The smart contract component (using Automata's DCAP attestation system) that validates TDX attestation quotes against current Intel DCAP collateral and interacts with the Allowlist Registry to register validated addresses.
+**Onchain Verifier**: The smart contract component (using Automata's DCAP attestation system) that validates TDX attestation quotes against current Intel DCAP collateral and interacts with the Allowlist Registry to register validated addresses.
 
 **Workload**: The specific software running inside a TEE. Its identity is derived from measurement registers that contain cryptographic hashes of loaded code and configuration.
 
 **`policyId`**: An identifier that maps to a list of approved `workloadId`s, enabling contracts to reference policies rather than specific workloads.
 
-**PCCS (Provisioning Certificate Caching Service)**: Automata's on-chain implementation of Intel's PCCS that stores Intel DCAP collateral on the blockchain, making it available for attestation verification. This ensures all verification is reproducible on L2.
+**PCCS (Provisioning Certificate Caching Service)**: Automata's onchain implementation of Intel's PCCS that stores Intel DCAP collateral on the blockchain, making it available for attestation verification. This ensures all verification is reproducible on L2.
 
 ### Operational Terms
 
@@ -203,7 +203,7 @@ class TDXQuote():
 - `TEESecurityVersion`: Security patch level of the TEE.
 - `QESecurityVersion`: Security version of the Quoting Enclave.
 - `QEVendorID`: Vendor ID of the Quoting Enclave (Intel).
-- `UserData`: User-defined data included in the quote (e.g., public key hash).
+- `UserData`: User-defined data included in the quote (e.g., public key).
 - `Signature`: ECDSA signature over the Quote.
 
 ### `TDReport`
@@ -281,14 +281,14 @@ The attestation process follows these steps:
 2. The Quote Enclave (QE) creates a Quote by signing the TD Report with an Attestation Key
 3. The Quote can be verified against Intel's Provisioning Certification Service (PCS)
 
-### On-Chain DCAP Attestation
+### Onchain DCAP Attestation
 
-The following code sample illustrates how DCAP attestation verification is performed on-chain, and how the key components (workloadId, tcbHash, and Ethereum address) are extracted and registered in the Flashtestations allowlist:
+The following code sample illustrates how DCAP attestation verification is performed onchain, and how the key components (workloadId, tcbHash, and Ethereum address) are extracted and registered in the Flashtestations allowlist:
 
 ```solidity
 // Sample interaction with Automata DCAP Attestation
 function registerTEEService(bytes calldata rawQuote) {
-    // Verify the DCAP quote on-chain using Automata's verifier
+    // Verify the DCAP quote onchain using Automata's verifier
     // Note: The verifier internally checks the quote against current collateral
     bool isValid = IDCAPAttestation(DCAP_ATTESTATION_CONTRACT).verifyAndAttestOnChain(rawQuote);
     require(isValid, "Invalid DCAP quote");
@@ -311,7 +311,7 @@ function registerTEEService(bytes calldata rawQuote) {
 ```
 
 This implementation highlights several key aspects:
-1. The DCAP attestation is verified using Automata's on-chain verifier
+1. The DCAP attestation is verified using Automata's onchain verifier
 2. The workloadId is derived from the quote's measurement registers
 3. The Ethereum address is extracted from the quote's report data
 4. The tcbHash representing the current Intel endorsements is obtained
@@ -360,11 +360,11 @@ The registry operates on these key abstractions:
 
    These endorsements (described in [DCAP Attestation Endorsements](#dcap-attestation-endorsements)) change periodically as Intel releases updates or discovers vulnerabilities. 
    
-   **Note:** This is an abstract representation - the actual implementation will need to adhere to the way Automata's on-chain PCCS system describes and updates collateral/endorsements, which involves more complex data structures and lifecycle management.
+   **Note:** This is an abstract representation - the actual implementation will need to adhere to the way Automata's onchain PCCS system describes and updates collateral/endorsements, which involves more complex data structures and lifecycle management.
    
    **Note 2:** Another thing which isn't addressed yet is how we can remove tcbhash entries from the allow list. They will need to be removed if the actual collateral gets stale. The remove method needs to check this, so we need a tcbHash -> collatoral mapping. This will likely be to expensive to maintain onchain, but keeping the offchain mapping and passing it to the remove method should be possible.
 
-3. **Ethereum Address**: The public key extracted from the attestation's report data field ([TDReport.ReportData](#tdreport)), which will be used to interact with on-chain contracts.
+3. **Ethereum Address**: The public key extracted from the attestation's report data field ([TDReport.ReportData](#tdreport)), which will be used to interact with onchain contracts.
 
 ### Key Relationship Model
 
@@ -409,12 +409,13 @@ This operation:
 When Intel endorsements become stale or insecure:
 
 ```
-function removeEndorsement(workloadId, tcbHash)
+function removeEndorsement(tcbHash, endorsement)
 ```
 
 This operation handles the case where a specific endorsement bundle is no longer considered secure:
-1. All addresses registered under this specific (workloadId, tcbHash) combination are removed completely
+1. All addresses registered under this specific tcbHash combination are removed completely
 2. This ensures only addresses with current, valid endorsements remain in the allowlist
+3. We're passing in the endorsement for verifcation purposes, i.e. map the endorsement to the tcbHash, check if the endorsement has been marked insecure, and only then proceed.
 
 ### Key Requirements
 
@@ -477,7 +478,7 @@ The complete verification flow connects attestation, the allowlist, and the poli
    - The attestation contains measurement registers (determining the `workloadId` as described in [Workload Identity Derivation](#workload-identity-derivation))
    - The report data field contains an Ethereum public key
 
-2. **Verification Service**: An on-chain verification service validates this attestation
+2. **Verification Service**: An onchain verification service validates this attestation
    - Checks cryptographic signatures
    - Validates against current Intel endorsements ([DCAPEndorsements](#dcapendorsements))
    - Extracts the Ethereum address and workload measurements
@@ -570,7 +571,7 @@ event AllowlistUpdated(
 );
 ```
 
-When an attestation is verified, the raw quote data is included in the transaction calldata, making it permanently available on-chain. The verification results and extracted data are then emitted as events for efficient indexing and querying.
+When an attestation is verified, the raw quote data is included in the transaction calldata, making it permanently available onchain. The verification results and extracted data are then emitted as events for efficient indexing and querying.
 
 ### Relationship with Allowlist
 
@@ -579,7 +580,7 @@ While the allowlist registry maintains the current authorized state (which addre
 1. **Allowlist**: Optimized for efficient runtime checks and state updates
 2. **Transparency Log**: Optimized for auditability and historical verification
 
-This dual approach enables efficient on-chain operations while maintaining complete transparency and auditability.
+This dual approach enables efficient onchain operations while maintaining complete transparency and auditability.
 
 ## Design Considerations
 
@@ -604,7 +605,7 @@ The system must optimize for gas efficiency, particularly for the lookup operati
 The design maintains clear separation between:
 
 1. **Allowlist Registry**: Tracks which addresses have attestations validated by current endorsements
-2. **Policy Registry**: Defines which workloads are acceptable for specific on-chain operations
+2. **Policy Registry**: Defines which workloads are acceptable for specific onchain operations
 3. **Verification Service**: Validates attestations and updates the allowlist
 4. **Consumer Contracts**: Use policy checks to authorize operations
 
