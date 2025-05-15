@@ -1,5 +1,45 @@
 # Flashtestations: Transparent On-Chain TEE Verification and Curated Allowlist Protocol
 
+## Table of Contents
+- [Introduction](#introduction)
+- [Design Goals](#design-goals)
+- [System Architecture](#system-architecture)
+- [Terminology](#terminology)
+  - [Intel TDX Primitives](#intel-tdx-primitives)
+  - [Flashtestations Protocol Components](#flashtestations-protocol-components)
+  - [Operational Terms](#operational-terms)
+- [Data Structures](#data-structures)
+  - [TDXQuote](#tdxquote)
+  - [TDReport](#tdreport)
+  - [DCAPEndorsements](#dcapendorsements)
+  - [TDXMeasurements](#tdxmeasurements)
+- [TEE Attestation Mechanism](#tee-attestation-mechanism)
+  - [Intel TDX DCAP Attestation](#intel-tdx-dcap-attestation)
+  - [On-Chain DCAP Attestation](#on-chain-dcap-attestation)
+  - [Workload Identity Derivation](#workload-identity-derivation)
+- [Allowlist Registry](#allowlist-registry)
+  - [Core Concepts](#core-concepts)
+  - [Key Relationship Model](#key-relationship-model)
+  - [Fundamental Operations](#fundamental-operations)
+  - [Key Requirements](#key-requirements)
+- [Policy Layer: Flexible Authorization](#policy-layer-flexible-authorization)
+  - [Policy Abstraction](#policy-abstraction)
+  - [Policy Operations](#policy-operations)
+- [End-to-End Flow](#end-to-end-flow)
+  - [Attestation and Registration](#attestation-and-registration)
+  - [Runtime Authorization](#runtime-authorization)
+  - [Maintenance: Handling Changing Endorsements](#maintenance-handling-changing-endorsements)
+- [Transparency Log](#transparency-log)
+  - [Purpose and Benefits](#purpose-and-benefits)
+  - [Logged Information](#logged-information)
+  - [Implementation Approach](#implementation-approach)
+  - [Relationship with Allowlist](#relationship-with-allowlist)
+- [Design Considerations](#design-considerations)
+  - [Replacement Model](#replacement-model)
+  - [Gas Optimization](#gas-optimization)
+  - [Separation of Concerns](#separation-of-concerns)
+- [Reproducible Builds](#reproducible-builds)
+
 ## Introduction
 
 Trusted Execution Environments (TEEs) offer a promising approach for running confidential workloads with hardware-enforced security guarantees. However, integrating TEEs with blockchain applications presents significant challenges: How can smart contracts verify that they're interacting with authentic TEE services running expected code? How can this verification scale efficiently on-chain? How can we maintain an up-to-date registry of validated services as hardware security requirements evolve?
@@ -276,8 +316,6 @@ This implementation highlights several key aspects:
 3. The Ethereum address is extracted from the quote's report data
 4. The tcbHash representing the current Intel endorsements is obtained
 5. The extracted information is registered in the allowlist
-
-## Workload Identity and Key Management
 
 ### Workload Identity Derivation
 
